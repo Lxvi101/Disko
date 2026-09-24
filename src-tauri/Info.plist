@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Disko measures the size of files on your Desktop. It never opens or changes them.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Disko measures the size of files in Documents. It never opens or changes them.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Disko measures the size of files in Downloads. It never opens or changes them.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>Disko only measures external drives if you choose one explicitly.</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>Disko only measures network drives if you choose one explicitly.</string>
+  <key>NSFileProviderDomainUsageDescription</key>
+  <string>Disko skips iCloud Drive and other cloud folders; it only needs to see that they exist.</string>
+</dict>
+</plist>

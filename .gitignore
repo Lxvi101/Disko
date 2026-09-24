@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+reports/
+
+# Node & Frontend
+node_modules/
+dist/
+
+# Rust & Tauri
+src-tauri/target/
+src-tauri/gen/
+.disko-webview.log
+
+# Local-only: research notes, personal audits, scratch images, history backup
+REFERENCE.md
+research/
+ChatGPT Image*.png
+.private/
+.DS_Store
+tests/__pycache__/

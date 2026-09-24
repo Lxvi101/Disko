@@ -1,0 +1,27 @@
+[package]
+name = "disko"
+version = "0.1.0"
+description = "Disko — disk space visualizer and Codex cleanup assistant"
+authors = ["Levi B"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "disko_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1", features = ["full"] }
+walkdir = "2"
+rayon = "1"
+chrono = "0.4"
+libc = "0.2"
+plist = "1"
