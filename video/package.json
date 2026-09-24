@@ -1,0 +1,24 @@
+{
+  "name": "disko-launch-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render Launch out/disko-launch.mp4",
+    "render:square": "remotion render LaunchSquare out/disko-launch-square.mp4",
+    "render:readme": "remotion render LaunchShort out/short.mp4 && ffmpeg -y -i out/short.mp4 -vf \"fps=15,scale=800:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=160[p];[b][p]paletteuse=dither=bayer:bayer_scale=4\" ../docs/demo.gif"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.528",
+    "@remotion/google-fonts": "4.0.528",
+    "d3-shape": "^3.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "4.0.528"
+  },
+  "devDependencies": {
+    "@types/d3-shape": "^3.1.6",
+    "@types/react": "^18.3.12",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,10 +1,14 @@
 # Disko
 
+![Disko](docs/demo.gif)
+
 A disk space app for macOS. Scan your drive, see what's eating it on a big sunburst chart, and clear it out without nuking something you needed.
 
 I built it because my Mac kept running out of space and I had no idea where it was going. First real run freed up about **100 GB**. Now I can't live without it.
 
 Most of it was Xcode, honestly. Simulators you forgot about, device support files for every iOS version you've ever plugged in, DerivedData from projects you deleted two years ago. Xcode is a bitch for this, so it gets its own page.
+
+[Watch the full launch video (with sound)](docs/launch.mp4)
 
 ## What it does
 
@@ -43,6 +47,17 @@ There's also a small Python CLI in `disko_cli/` that does the scan → plan → 
 ```
 
 See `AGENT_USAGE.md` for the full flow.
+
+## Launch video
+
+The video is made with [Remotion](https://remotion.dev) and lives in `video/`. The screenshots come from the real app running against a fake disk (`video/capture/`), so no real files show up.
+
+```sh
+cd video && bun install
+bun run studio          # edit it live
+bun run render          # full video
+bun run render:readme   # the GIF at the top of this README
+```
 
 ## Tests
 
