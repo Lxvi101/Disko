@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Disko · Your disk has been partying without you</title>
+  <meta name="description" content="Disko is a free macOS app that shows where your disk space went and clears out the junk, without touching anything you needed." />
+  <meta property="og:title" content="Disko · Your disk has been partying without you" />
+  <meta property="og:description" content="See where every gigabyte went. Clear the junk, safely. Free and open source for macOS." />
+  <meta property="og:image" content="assets/hero.webp" />
+  <meta name="theme-color" content="#020403" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=Instrument+Serif:ital@1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="reflections" aria-hidden="true"></canvas>
+  <canvas id="tiles" aria-hidden="true"></canvas>
+
+  <header class="nav">
+    <a class="brand" href="#top"><img src="assets/icon.webp" alt="" width="26" height="26" />Disko</a>
+    <nav>
+      <a href="#lineup">Features</a>
+      <a href="#bouncer">Safety</a>
+      <a href="https://github.com/Lxvi101/Disko">GitHub</a>
+      <a class="nav-cta" href="https://github.com/Lxvi101/Disko/releases/latest" data-download>Download</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <!-- ============ hero ============ -->
+    <section class="hero">
+      <div class="rays" aria-hidden="true"></div>
+      <img class="hero-art" src="assets/hero.webp" alt="The Disko icon: a hard drive covered in green mirror tiles, under a disco ball" width="1200" height="1200" fetchpriority="high" />
+
+      <div class="hero-copy">
+        <p class="eyebrow reveal">Disko for macOS</p>
+        <h1 class="reveal">Your disk has been <em>partying</em><br /> without you.</h1>
+        <p class="lede reveal">Disko shows where every gigabyte went and clears out the junk, safely. The&nbsp;first real run freed up 100&nbsp;GB.</p>
+
+        <div class="actions reveal">
+          <a class="btn btn-primary" href="https://github.com/Lxvi101/Disko/releases/latest" data-download>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V4a1 1 0 0 1 1-1ZM5 19a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1Z"/></svg>
+            <span data-download-label>Download for Mac</span>
+          </a>
+          <button class="btn btn-ghost party-toggle" type="button" aria-pressed="false">
+            <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <span class="party-label">Party mode</span>
+          </button>
+        </div>
+        <p class="fine reveal" data-download-meta>Free and open source · macOS 12 or later</p>
+      </div>
+    </section>
+
+    <!-- ============ app ============ -->
+    <section class="showcase">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="window" id="window">
+        <div class="titlebar"><i></i><i></i><i></i></div>
+        <img src="assets/map.webp" alt="Disko's sunburst map of a home folder: 602 GB, with Library, Movies, Pictures and Downloads as the biggest slices" width="2000" height="1250" />
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="reveal"><strong>100<small>GB</small></strong><span>freed on the first real run</span></div>
+      <div class="reveal"><strong>0</strong><span>files deleted without a way back</span></div>
+      <div class="reveal"><strong>Free</strong><span>and open source, MIT licensed</span></div>
+    </section>
+
+    <!-- ============ features ============ -->
+    <section class="lineup" id="lineup">
+      <header class="section-head reveal">
+        <p class="eyebrow">Tonight's lineup</p>
+        <h2>Everyone who's been<br /> <em>hogging the floor.</em></h2>
+      </header>
+
+      <div class="bento">
+        <article class="card card-xcode reveal">
+          <div class="card-copy">
+            <span class="tag">Headliner</span>
+            <h3>Xcode, live on the main stage.</h3>
+            <p>Simulators you forgot about, device support for every iOS you ever plugged in, DerivedData from projects you deleted two years ago. Pick what stays, one by one.</p>
+          </div>
+          <img src="assets/xcode.webp" alt="Xcode storage: 106 GB across simulators, device support, DerivedData, caches and archives" loading="lazy" width="2320" height="640" />
+        </article>
+
+        <article class="card card-assistant reveal">
+          <div class="card-copy">
+            <span class="tag">Optional</span>
+            <h3>Ask what's safe to drop.</h3>
+            <p>With the Codex CLI installed, the assistant reads your scan and explains what's worth removing. It's read-only and can't delete a thing.</p>
+          </div>
+          <img src="assets/assistant.webp" alt="Assistant panel explaining that most space is Xcode simulators, DerivedData and Docker" loading="lazy" width="760" height="1140" />
+        </article>
+
+        <article class="card card-suggestions reveal">
+          <div class="card-copy">
+            <h3>Junk that grows back anyway.</h3>
+            <p>Caches and build output that get rebuilt on demand, each with a reason. Tools with their own cleanup command, like npm, Homebrew and uv, point you to it instead.</p>
+          </div>
+          <img src="assets/suggestions.webp" alt="Suggestions list: DerivedData, simulator caches, cargo target folders, node_modules" loading="lazy" width="1800" height="450" />
+        </article>
+
+        <article class="card card-apps reveal">
+          <div class="card-copy">
+            <h3>Guests who never left.</h3>
+            <p>Leftovers from apps you uninstalled, and the old versions Adobe, Cursor and Claude Code leave behind.</p>
+          </div>
+          <img src="assets/apps.webp" alt="App cleanup cards for Adobe and Helium" loading="lazy" width="1600" height="520" />
+        </article>
+
+        <article class="card card-inactive reveal">
+          <div class="card-copy">
+            <h3>The wallflowers.</h3>
+            <p>Big files you haven't opened in months, sorted by size.</p>
+          </div>
+          <img src="assets/inactive.webp" alt="Inactive files list with last-used dates" loading="lazy" width="1620" height="640" />
+        </article>
+
+        <article class="card card-quarantine reveal">
+          <div class="card-copy">
+            <h3>Coat check.</h3>
+            <p>Nothing is deleted straight away. It waits in quarantine until you're sure.</p>
+          </div>
+          <img src="assets/quarantine.webp" alt="Quarantine with two held batches and restore buttons" loading="lazy" width="1300" height="560" />
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ safety ============ -->
+    <section class="bouncer" id="bouncer">
+      <div class="bouncer-inner reveal">
+        <p class="eyebrow">Door policy</p>
+        <h2>There's a bouncer.<br /> <em>No exceptions.</em></h2>
+        <p class="lede">Some things never get offered for removal, no matter how big they are.</p>
+        <ul class="denied">
+          <li>Passwords &amp; keychains</li>
+          <li>Browser profiles</li>
+          <li>Photos</li>
+          <li>Mail</li>
+          <li>iCloud Drive</li>
+          <li>System files</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ video ============ -->
+    <section class="aftermovie">
+      <header class="section-head reveal">
+        <p class="eyebrow">The aftermovie</p>
+        <h2>Twenty-six seconds.<br /> <em>Sound on.</em></h2>
+      </header>
+      <div class="player reveal">
+        <video src="assets/launch.mp4" controls playsinline preload="metadata" poster="assets/poster.webp"></video>
+      </div>
+    </section>
+
+    <!-- ============ encore ============ -->
+    <section class="encore">
+      <img class="encore-art" src="assets/hero.webp" alt="" width="1200" height="1200" loading="lazy" />
+      <div class="encore-copy">
+        <h2 class="reveal">Clear the<br /> <em>dance floor.</em></h2>
+        <div class="actions reveal">
+          <a class="btn btn-primary" href="https://github.com/Lxvi101/Disko/releases/latest" data-download>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v9.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V4a1 1 0 0 1 1-1ZM5 19a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1Z"/></svg>
+            <span data-download-label>Download for Mac</span>
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/Lxvi101/Disko">View source</a>
+        </div>
+        <p class="fine reveal" data-download-meta>Free and open source · macOS 12 or later</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>© 2026 Disko · MIT</span>
+    <span class="quiet">No disks were harmed at this party.</span>
+    <span><a href="https://github.com/Lxvi101/Disko">GitHub</a> · <a href="https://github.com/Lxvi101/Disko/issues">Issues</a></span>
+  </footer>
+
+  <audio id="beat" src="assets/beat.mp3" loop preload="none"></audio>
+  <script src="main.js"></script>
+</body>
+</html>
