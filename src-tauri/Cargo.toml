@@ -1,6 +1,6 @@
 [package]
 name = "disko"
-version = "0.1.0"
+version = "0.2.0"
 description = "Disko — disk space visualizer and Codex cleanup assistant"
 authors = ["Levi B"]
 license = "MIT"
@@ -25,3 +25,5 @@ rayon = "1"
 chrono = "0.4"
 libc = "0.2"
 plist = "1"
+tauri-plugin-updater = "2.12.0"
+tauri-plugin-process = "2.3.1"

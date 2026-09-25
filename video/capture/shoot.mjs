@@ -64,9 +64,9 @@ const shots = {
   },
   async xcode() {
     const page = await open({ page: 'apps' });
-    await page.locator('.app-store-card', { hasText: 'Xcode' }).click();
+    await page.locator('[data-app="xcode"]').click();
     await settle(page, 1200);
-    await page.evaluate(() => { const d = document.getElementById('app-cleanup-detail'); const s = document.querySelector('.app-store-page'); s.scrollTop += d.getBoundingClientRect().top - 70; });
+    await page.evaluate(() => { const d = document.querySelector('.app-info-strip'); const s = document.querySelector('.app-store-page'); s.scrollTop += d.getBoundingClientRect().bottom - 70; });
     // Pre-select a few duplicate simulators so the action bar shows.
     const boxes = page.locator('.xcode-row input[type="checkbox"]');
     for (let i = 0; i < 4; i++) await boxes.nth(i).check();

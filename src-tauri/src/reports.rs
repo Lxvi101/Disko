@@ -91,7 +91,7 @@ fn iso(secs: i64) -> Option<String> {
 }
 
 /// Parse `mdls -raw -name kMDItemLastUsedDate` output ("2026-05-18 17:53:50 +0000" or "(null)").
-fn parse_mdls_date(s: &str) -> Option<i64> {
+pub(crate) fn parse_mdls_date(s: &str) -> Option<i64> {
     let s = s.trim();
     if s.is_empty() || s == "(null)" {
         return None;

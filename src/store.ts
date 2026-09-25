@@ -212,7 +212,7 @@ export const useStore = create<AppState>((set, get) => ({
         .then(async (o) => {
           if (o?.advanced != null) get().setAdvanced(o.advanced);
           if (o?.start_path) await get().navigate(o.start_path);
-          if (o?.start_page) set({ page: o.start_page as Page, startScreen: false });
+          if (o?.start_page) set({ page: (({ files: 'junk', inactive: 'timeline' } as Record<string, string>)[o.start_page] ?? o.start_page) as Page, startScreen: false });
           if (o?.start_path) set({ startScreen: false });
           if (o?.autoscan) set({ autoscan: o.autoscan, startScreen: true });
         })

@@ -6,6 +6,8 @@ mod scanner;
 mod scan_storage;
 mod xcode;
 mod app_cleanup;
+mod findings;
+mod timeline;
 
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -2293,6 +2295,35 @@ async fn get_candidates() -> Result<Vec<CandidateItem>, String> {
 }
 
 #[tauri::command]
+async fn get_junk(min_bytes: Option<u64>) -> Result<Vec<findings::JunkItem>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db().ok_or("No scan database loaded")?;
+        findings::junk(&conn, home_str(), min_bytes.unwrap_or(1 << 20))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn find_duplicates(min_bytes: Option<u64>) -> Result<Vec<findings::DupGroup>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db().ok_or("No scan database loaded")?;
+        findings::duplicates(&conn, home_str(), min_bytes.unwrap_or(1 << 20))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_timeline() -> Result<Vec<timeline::OldItem>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        timeline::timeline(home_str())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn get_unused_files() -> Result<Vec<UnusedItem>, String> {
     tauri::async_runtime::spawn_blocking(move || get_unused_files_sync())
         .await
@@ -2417,6 +2448,8 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(ProcState::default())
         .invoke_handler(tauri::generate_handler![
             get_app_info,
@@ -2427,6 +2460,9 @@ pub fn run() {
             search_entries,
             get_largest_files,
             get_candidates,
+            get_junk,
+            find_duplicates,
+            get_timeline,
             get_unused_files,
             get_unused_apps,
             get_remnants,

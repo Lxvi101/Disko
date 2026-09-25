@@ -6,8 +6,8 @@ import { catMeta } from '../../lib/format';
 export const CategoryChip: React.FC<{ category: string; className?: string; small?: boolean }> = ({ category, className = '', small }) => {
   const m = catMeta(category);
   return (
-    <span className={`chip ${className}`} style={{ color: m.text, fontSize: small ? 10 : undefined }}>
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.color }} />
+    <span className={`inline-flex items-center gap-1.5 font-medium ${small ? 'text-[11.5px]' : 'text-[12px]'} ${className}`} style={{ color: 'var(--muted)' }} title={m.description}>
+      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: m.color }} />
       {m.label}
     </span>
   );

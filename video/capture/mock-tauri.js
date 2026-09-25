@@ -207,7 +207,68 @@
   const search = (q) => [...byPath.values()].filter((n) => n.name.toLowerCase().includes(q.toLowerCase())).sort((a, b) => b.total - a.total).slice(0, 40).map(item);
   const largest = [...byPath.values()].filter((n) => n.kind === 'file').sort((a, b) => b.total - a.total).slice(0, 40).map(item);
 
+  const junkItem = (rel, gb, tag, category, days, action = 'quarantine', tool = null) => ({ path: HOME + rel, name: rel.split('/').pop(), kind: /\.(dmg|pkg|zip)$/.test(rel) ? 'file' : 'directory', total: gb * G, mtime: NOW - days * DAY, category, reason: 'Generated data; recreated when needed.', tag, action, cost: 'network-small', tool });
+  const junk = [
+    junkItem('/Library/pnpm', 7.6, 'managed-cleanup', 'rebuildable', 3, 'manager_command', 'pnpm store prune'),
+    junkItem('/Code/disko/src-tauri/target', 4.8, 'build-output', 'rebuildable', 1),
+    junkItem('/Code/sunlight/app/node_modules', 3.7, 'generated-project-output', 'rebuildable', 210),
+    junkItem('/.npm/_npx', 3.1, 'managed-cleanup', 'rebuildable', 40),
+    junkItem('/Library/Developer/Xcode/DerivedData/MealClub-encxwgefwsjlrtacjvrvdvqwvewm', 2.9, 'build-output', 'rebuildable', 95),
+    junkItem('/Library/Caches/Adobe', 1.7, 'app-cache', 'rebuildable', 12),
+    junkItem('/Code/jarvis/.venv', 1.5, 'generated-environment', 'review', 400),
+    junkItem('/.cache/uv', 1.4, 'managed-cleanup', 'rebuildable', 2, 'manager_command', 'uv cache prune'),
+    junkItem('/Library/Caches/com.spotify.client', 1.3, 'app-cache', 'rebuildable', 1),
+    junkItem('/Code/old-site/node_modules', 1.1, 'generated-project-output', 'rebuildable', 800),
+    junkItem('/Library/Logs/DiagnosticReports', 0.4, 'diagnostic', 'review', 5),
+    junkItem('/Downloads/Figma-124.3.dmg', 0.3, 'old-installer', 'review', 60),
+    ...Array.from({ length: 70 }, (_, i) => junkItem(`/Code/project-${i + 1}/node_modules`, Math.round((0.9 - i * 0.011) * 100) / 100, 'generated-project-output', 'rebuildable', 20 + i * 9)),
+    ...Array.from({ length: 30 }, (_, i) => junkItem(`/Code/project-${i + 1}/src/__pycache__`, 0.02, 'build-cache', 'rebuildable', 30 + i)),
+  ];
+  const dupFile = (rel, days) => ({ path: HOME + rel, name: rel.split('/').pop(), mtime: NOW - days * DAY });
+  const duplicates = [
+    { size: 1.4 * G, allocated: 1.4 * G, files: [dupFile('/Movies/Iceland 2025.mov', 300), dupFile('/Desktop/Iceland 2025.mov', 120), dupFile('/Downloads/Iceland 2025.mov', 30)] },
+    { size: 690 * M, allocated: 690 * M, files: [dupFile('/Downloads/Xcode_16.xip', 200), dupFile('/Documents/Installers/Xcode_16.xip', 150)] },
+    { size: 12 * M, allocated: 12 * M, files: [dupFile('/Pictures/Wallpaper/BG.png', 500), dupFile('/Code/raynote/graphics/BG.png', 40)] },
+  ];
+  const aiReply = 'Most of your space outside the usual junk is **old video exports** and **two unused toolchains**. The Final Cut exports in Movies have not been opened since last year, and the Rust nightly and Node 18 installs are not referenced by any project.\n\n```disko-actions\n{"suggestions":[{"path":"' + HOME + '/Movies/Exports 2024","bytes":' + 18 * G + ',"reason":"Rendered video exports last changed 14 months ago. The Final Cut library that produced them is still present.","confidence":"medium","action":"quarantine"},{"path":"' + HOME + '/.rustup/toolchains/nightly-2025-03-01-aarch64-apple-darwin","bytes":' + 1.9 * G + ',"reason":"Old nightly toolchain; no rust-toolchain file pins it.","confidence":"high","action":"command","command":"rustup toolchain uninstall nightly-2025-03-01"},{"path":"' + HOME + '/Downloads/Old Backups","bytes":' + 6.2 * G + ',"reason":"Zip archives of a 2023 project. Check you do not need them before removing.","confidence":"low","action":"quarantine"}]}\n```';
+
+  const old = (lane, rel, name, label, gb, days, date_kind, extra = {}) => ({ path: (rel.startsWith('/') && !rel.startsWith('/Library') && !rel.startsWith('/Code') && !rel.startsWith('/Downloads') && !rel.startsWith('/Desktop') && !rel.startsWith('/Movies') && !rel.startsWith('/Documents') && !rel.startsWith('/.') ? '' : HOME) + rel, name, lane, label, total: gb * G, date: days == null ? null : NOW - days * DAY, date_kind, detail: '', category: 'review', action: 'quarantine', tool: null, junk: [], ...extra });
+  const timeline = [
+    old('app', '/Applications/Topaz Photo.app', 'Topaz Photo', 'App', 23.8, 420, 'opened', { detail: 'Version 3.4' }),
+    old('app', '/Applications/Final Cut Pro.app', 'Final Cut Pro', 'App', 6.1, 800, 'opened'),
+    old('app', '/Applications/Blender.app', 'Blender', 'App', 1.4, 1200, 'opened'),
+    old('app', '/Applications/Unity Hub.app', 'Unity Hub', 'App', 0.6, 2100, 'last seen'),
+    old('app', '/Applications/Xcode.app', 'Xcode', 'App', 12.2, 0.2, 'opened'),
+    old('app', '/Applications/Figma.app', 'Figma', 'App', 0.5, 3, 'opened'),
+    old('app', '/Applications/Zoom.app', 'zoom.us', 'App', 0.3, 60, 'opened'),
+    old('app', '/Applications/Sketch.app', 'Sketch', 'App', 0.4, null, 'opened'),
+    ...Array.from({ length: 30 }, (_, i) => old('app', `/Applications/App ${i}.app`, `Utility ${i + 1}`, 'App', 0.05 + (i % 7) * 0.08, Math.round(Math.pow(1.28, i)), 'opened')),
+    old('project', '/Code/old-site', 'old-site', 'Project', 1.3, 900, 'worked on', { junk: [[HOME + '/Code/old-site/node_modules', 1.1 * G]] }),
+    old('project', '/Code/sunlight', 'sunlight', 'Project', 3.8, 2, 'worked on', { junk: [[HOME + '/Code/sunlight/app/node_modules', 3.7 * G]] }),
+    old('project', '/Code/jarvis', 'jarvis', 'Project', 1.7, 400, 'worked on', { junk: [[HOME + '/Code/jarvis/.venv', 1.5 * G]] }),
+    old('project', '/Code/hackathon-2023', 'hackathon-2023', 'Project', 0.9, 740, 'worked on', { junk: [[HOME + '/Code/hackathon-2023/node_modules', 0.8 * G]] }),
+    ...Array.from({ length: 22 }, (_, i) => old('project', `/Code/project-${i + 1}`, `project-${i + 1}`, 'Project', 0.2 + (i % 5) * 0.25, 20 + i * 45, 'worked on', { junk: [[HOME + `/Code/project-${i + 1}/node_modules`, (0.15 + (i % 5) * 0.2) * G]] })),
+    old('file', '/Movies/Iceland 2025 raw.mov', 'Iceland 2025 raw.mov', 'MOV', 14.2, 380, 'opened'),
+    old('file', '/Documents/VMs/Windows 11.vhdx', 'Windows 11.vhdx', 'VHDX', 22.4, 610, 'modified'),
+    old('file', '/Movies/Wedding export.mp4', 'Wedding export.mp4', 'MP4', 4.2, 1500, 'opened'),
+    old('file', '/Documents/model.safetensors', 'model.safetensors', 'SAFETENSORS', 1.6, 6, 'modified'),
+    old('download', '/Downloads/Xcode_15.xip', 'Xcode_15.xip', 'Installer', 7.9, 700, 'added'),
+    old('download', '/Downloads/ubuntu-22.04.iso', 'ubuntu-22.04.iso', 'Installer', 4.7, 1000, 'added'),
+    old('download', '/Desktop/Screenshots', 'Screenshots', 'Folder', 0.9, 200, 'opened'),
+    old('download', '/Downloads/Temporary', 'Temporary', 'Folder', 0.3, 640, 'opened'),
+    old('developer', '/Library/Developer/CoreSimulator/Devices/A', 'iPhone 14 Pro', 'Simulator', 3.1, 520, 'booted'),
+    old('developer', '/Library/Developer/CoreSimulator/Devices/B', 'iPad Air', 'Simulator', 2.2, 300, 'booted'),
+    old('developer', '/Library/Developer/Xcode/iOS DeviceSupport/iPhone15,2 17.1', 'iPhone15,2 17.1 (21B80)', 'Device support', 5.6, 690, 'added'),
+    old('developer', '/.nvm/versions/node/v16.20.0', 'v16.20.0', 'Node.js', 0.2, 1100, 'installed', { action: 'manager_command', tool: 'nvm uninstall 16.20.0' }),
+    old('developer', '/.rustup/toolchains/nightly-2025-03-01-aarch64-apple-darwin', 'nightly-2025-03-01', 'Rust toolchain', 1.9, 205, 'installed', { action: 'manager_command', tool: 'rustup toolchain uninstall nightly-2025-03-01' }),
+    old('backup', '/Library/Application Support/MobileSync/Backup/00008030', "Alex's iPhone 12", 'Device backup', 38.5, 980, 'backed up', { action: 'owner_app', detail: 'iPhone 12' }),
+  ];
+
   const handlers = {
+    get_timeline: () => timeline,
+    get_junk: () => junk,
+    find_duplicates: () => duplicates,
+    codex_chat: () => ({ success: true, text: aiReply, error: null, usage: null }),
     get_app_info: () => info,
     load_disk_overview: () => ({ root: HOME, volume, items: children(HOME), db_loaded: true, entry_count: scanMeta.entries, category_totals: { rebuildable: 92 * G, review: 240 * G, keep: 190 * G, protected: 12 * G } }),
     query_folder_children: ({ path }) => children(path),

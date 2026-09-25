@@ -288,7 +288,7 @@ export interface ScanInfo {
   active: boolean;
 }
 
-export type Page = 'apps' | 'explore' | 'files' | 'suggestions' | 'inactive' | 'quarantine';
+export type Page = 'apps' | 'explore' | 'junk' | 'suggestions' | 'timeline' | 'quarantine';
 export type VizMode = 'sunburst' | 'treemap' | 'list';
 
 export interface XcodeItem {
@@ -303,3 +303,23 @@ export interface DeleteResult {
 export type CleanupMode = 'quarantine' | 'delete';
 
 export interface AppStorageInventory { total: number; potential: number; partial: boolean; items: XcodeItem[]; warnings: string[] }
+
+/** The outermost folder of a generated or disposable tree: a node_modules, a venv, an app's cache. */
+export interface JunkItem {
+  path: string; name: string; kind: string; total: number; mtime: number | null;
+  category: string; reason: string; tag: string; action: ActionKind | string; cost: RecreateCost | string; tool?: string | null;
+}
+export interface DupFile { path: string; name: string; mtime: number | null }
+export interface DupGroup { size: number; allocated: number; files: DupFile[] }
+
+export type TimelineLane = 'app' | 'project' | 'file' | 'download' | 'developer' | 'backup';
+/** Anything with an age: an app by last use, a project by last git activity, a file by last open. */
+export interface OldItem {
+  path: string; name: string; lane: TimelineLane; label: string; total: number;
+  /** Newest evidence of use in seconds; null when macOS keeps no record. */
+  date: number | null;
+  date_kind: 'opened' | 'last seen' | 'worked on' | 'modified' | 'added' | 'booted' | 'installed' | 'backed up' | 'created' | 'last changed' | string;
+  detail: string; category: string; action: string; tool?: string | null;
+  /** Generated folders inside a project, as [path, bytes]. */
+  junk: [string, number][];
+}

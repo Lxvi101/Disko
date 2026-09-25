@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, Box, Check, ChevronRight, Code2, Cpu, Eye, Folder, Info, RefreshCw, Search, Smartphone, Trash2 } from 'lucide-react';
+import { Archive, Box, Check, ChevronRight, Code2, Cpu, Eye, Folder, Info, Search, Smartphone, Trash2 } from 'lucide-react';
 import { api, errorText } from '../../lib/api';
 import { formatBytes, shortPath } from '../../lib/format';
 import { useStore } from '../../store';
@@ -44,7 +44,6 @@ export const XcodeCleanupSection: React.FC<{ snapshot?: XcodeInventory; onRefres
   const totals = useMemo(() => Object.fromEntries(GROUPS.map((g) => [g.id, items.filter((i) => i.group === g.id).reduce((n, i) => n + i.total, 0)])), [inventory]);
   const visible = items.filter((i) => i.group === group && `${i.name} ${i.path} ${i.subtitle}`.toLowerCase().includes(query.toLowerCase()) && (filter === 'all' || i.badges.includes(filter)));
   const chosen = items.filter((i) => selected.has(i.path) && !i.blocked);
-  const total = items.reduce((sum, i) => sum + i.total, 0);
   const selectedBytes = chosen.reduce((sum, i) => sum + i.total, 0);
   const toggle = (path: string) => setSelected((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
   const clean = useCallback((targets: XcodeItem[], mode: CleanupMode) => {
@@ -54,14 +53,8 @@ export const XcodeCleanupSection: React.FC<{ snapshot?: XcodeInventory; onRefres
   }, []);
   const detailItem = typeof detail === 'object' ? detail : null;
   const detailGroup = groupFor(typeof detail === 'string' ? detail : detailItem?.group ?? group);
-  return <div className="px-5 pb-5">
-    <div className="xcode-hero mt-3 mb-4 rounded-xl p-4 flex items-center gap-6">
-      <div className="flex-1"><h2 className="text-[17px] font-semibold tracking-tight">Choose what stays. Reclaim the rest.</h2>
-        <p className="text-[12px] mt-1" style={{ color: 'var(--muted)' }}>Review individual devices, OS versions and project workspaces.</p>
-      </div>
-      <div className="text-right flex-shrink-0"><div className="text-[29px] tracking-tight tnum">{loading && !inventory ? '—' : formatBytes(total)}</div><div className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>{items.length} entries · measured on disk</div></div>
-      <button aria-label="Refresh Xcode storage" title="Refresh live storage" className="btn btn-icon" disabled={loading || busy} onClick={() => onRefresh ? onRefresh() : setRefresh((v) => v + 1)}>{loading ? <Spinner /> : <RefreshCw className="w-4 h-4" />}</button>
-    </div>
+  return <div className="mt-8">
+    <h2 className="text-[20px] font-bold tracking-tight mb-3">What you can clean</h2>
     <div className="grid grid-cols-3 xl:grid-cols-6 gap-2.5 mb-5" aria-label="Storage categories">
       {GROUPS.map((g) => <button key={g.id} onClick={() => { setGroup(g.id); setFilter('all'); }} aria-pressed={group === g.id} className="card text-left p-3.5 transition-colors" style={{ borderColor: group === g.id ? g.color : undefined, background: group === g.id ? `color-mix(in srgb, ${g.color} 9%, var(--bg-2))` : undefined }}>
         <g.icon className="w-4 h-4 mb-3" style={{ color: g.color }} /><div className="text-[12px] font-medium">{g.label}</div><div className="tnum text-[20px] mt-1">{formatBytes(totals[g.id] ?? 0)}</div>

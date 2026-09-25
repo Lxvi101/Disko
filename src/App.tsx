@@ -6,13 +6,14 @@ import { Assistant } from './components/Assistant';
 import { Collector, CleanModal } from './components/Collector';
 import { CommandPalette } from './components/CommandPalette';
 import { Toasts } from './components/Toasts';
+import { UpdatePrompt } from './components/UpdatePrompt';
 import { ContextMenuHost } from './components/ContextMenu';
 import { ExplorePage } from './components/pages/Explore';
 import { SuggestionsPage } from './components/pages/Suggestions';
-import { InactivePage } from './components/pages/Inactive';
+import { TimelinePage } from './components/pages/Timeline';
 import { QuarantinePage } from './components/pages/Quarantine';
 import { AppCleanupPage } from './components/pages/AppCleanup';
-import { FilesPage } from './components/pages/Files';
+import { JunkPage } from './components/pages/Junk';
 import { ScanScreen } from './components/ScanScreen';
 import { useScan } from './hooks/useScan';
 import { Switch } from './components/ui';
@@ -22,18 +23,18 @@ import type { Page } from './types';
 const PAGES: Record<Page, React.FC> = {
   apps: AppCleanupPage,
   explore: ExplorePage,
-  files: FilesPage,
+  junk: JunkPage,
   suggestions: SuggestionsPage,
-  inactive: InactivePage,
+  timeline: TimelinePage,
   quarantine: QuarantinePage,
 };
 
 const TABS: { id: Page; label: string }[] = [
   { id: 'explore', label: 'Map' },
-  { id: 'files', label: 'Files' },
+  { id: 'junk', label: 'Junk' },
   { id: 'suggestions', label: 'Suggestions' },
-  { id: 'inactive', label: 'Inactive' },
-  { id: 'apps', label: 'App cleanup' },
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'apps', label: 'Apps' },
   { id: 'quarantine', label: 'Quarantine' },
 ];
 
@@ -49,7 +50,7 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('contextmenu', h);
   }, []);
   const s = useStore();
-  const { booted, bootError, boot, page, setPage, assistantOpen, setAssistantOpen, paletteOpen, setPaletteOpen, currentPath, rootPath, navigate, navigateUp, goBack, goForward, canBack, canForward, advanced, setAdvanced, colorBy, setColorBy, theme, resolvedTheme, setTheme, applyTheme, startScreen, setStartScreen, info, overview, candidates, journals, cleanModalOpen, setCleanModalOpen, trayOpen, setTrayOpen, select } = s;
+  const { booted, bootError, boot, page, setPage, assistantOpen, setAssistantOpen, paletteOpen, setPaletteOpen, currentPath, rootPath, navigate, navigateUp, goBack, goForward, canBack, canForward, advanced, setAdvanced, colorBy, setColorBy, theme, resolvedTheme, setTheme, applyTheme, startScreen, setStartScreen, info, overview, journals, cleanModalOpen, setCleanModalOpen, trayOpen, setTrayOpen, select } = s;
   const { scan, scanning, cancelScan } = useScan();
 
   useEffect(() => { boot(); }, [boot]);
@@ -153,7 +154,7 @@ export const App: React.FC = () => {
               <motion.nav key="tabs" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }} className="no-drag flex items-center gap-0.5 mr-2">
                 {TABS.map((t) => {
                   const active = page === t.id;
-                  const count = t.id === 'suggestions' ? candidates.length : t.id === 'quarantine' ? heldJournals : 0;
+                  const count = t.id === 'quarantine' ? heldJournals : 0;
                   return (
                     <button key={t.id} onClick={() => { setPage(t.id); if (t.id === 'apps') setStartScreen(false); }} className="relative px-2.5 h-7 rounded-md text-[12.5px] transition-colors" style={{ color: active ? 'var(--text)' : 'var(--muted)' }}>
                       {active && <motion.span layoutId="tab-bg" className="absolute inset-0 rounded-md" style={{ background: 'var(--bg-3)' }} transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
@@ -171,7 +172,7 @@ export const App: React.FC = () => {
             </button>
             <button className="btn btn-ghost btn-icon" onClick={() => setStartScreen(!startScreen)} title="Scans" style={{ color: showScan ? 'var(--text)' : undefined }}><FolderSearch className="w-4 h-4" /></button>
             <button className="btn btn-ghost btn-icon" onClick={() => setPaletteOpen(true)} title="Search (⌘K)"><Search className="w-4 h-4" /></button>
-            <button className="btn btn-ghost btn-icon" onClick={() => setAssistantOpen(!assistantOpen)} title="Assistant (⌘J)" style={{ color: assistantOpen ? 'var(--text)' : undefined }}><Sparkles className="w-4 h-4" /></button>
+            <button className="btn btn-ghost btn-icon" onClick={() => setAssistantOpen(!assistantOpen)} title={`Assistant (⌘J)${info?.codex_version ? ` · ${info.codex_version}` : ''}`} style={{ color: assistantOpen ? 'var(--text)' : undefined }}><Sparkles className="w-4 h-4" /></button>
             <div className="w-px h-4 mx-1" style={{ background: 'var(--line-2)' }} />
             <Switch on={advanced} onChange={setAdvanced} label="Advanced" />
           </div>
@@ -180,7 +181,7 @@ export const App: React.FC = () => {
         {/* advanced strip */}
         <AnimatePresence initial={false}>
           {advanced && (
-            <motion.div key="strip" initial={{ height: 0, opacity: 0 }} animate={{ height: 32, opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="flex-shrink-0 overflow-hidden flex items-center gap-4 px-6 text-[11.5px]" style={{ color: 'var(--muted)' }}>
+            <motion.div key="strip" initial={{ height: 0, opacity: 0 }} animate={{ height: 36, opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="flex-shrink-0 overflow-hidden flex items-center gap-4 px-6 text-[11.5px]" style={{ color: 'var(--muted)' }}>
               {page === 'explore' && (
                 <span className="flex items-center gap-1.5">
                   Colour by
@@ -189,16 +190,22 @@ export const App: React.FC = () => {
                   ))}
                 </span>
               )}
-              {vol && <span className="tnum">{formatBytes(vol.available)} free of {formatBytes(vol.total)}</span>}
-              {info?.scan?.entries ? <span className="tnum">{formatNumber(info.scan.entries)} entries · scanned {relativeTime(info.scan.finished ?? null)}</span> : <span>Not scanned yet</span>}
-              {s.coverageIssues > 0 && <span className="tnum">{formatNumber(s.coverageIssues)} unreadable paths</span>}
+              {vol && (
+                <span className="flex items-center gap-2 tnum" title={`${formatBytes(vol.total - vol.available)} used`}>
+                  <span className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-3)' }}>
+                    <span className="block h-full rounded-full" style={{ width: `${Math.min(100, (1 - vol.available / Math.max(1, vol.total)) * 100)}%`, background: vol.available / Math.max(1, vol.total) < 0.1 ? 'var(--danger)' : 'var(--muted)' }} />
+                  </span>
+                  {formatBytes(vol.available)} free of {formatBytes(vol.total)}
+                </span>
+              )}
+              {info?.scan?.entries ? <span className="tnum" title={`${formatNumber(info.scan.entries)} items`}>Scanned {relativeTime(info.scan.finished ?? null)}</span> : <span>Not scanned yet</span>}
+              {s.coverageIssues > 0 && <span className="tnum" title="Folders macOS did not let Disko read. Grant Full Disk Access and rescan to include them.">{formatNumber(s.coverageIssues)} folders unreadable</span>}
               <span className="flex-1" />
               {scan && !scan.done ? (
-                <span className="flex items-center gap-1.5"><RefreshCw className="w-3 h-3 animate-spin" />{scan.entries ? `${formatNumber(scan.entries)} entries` : scan.message}<button className="btn btn-ghost !p-0.5" onClick={cancelScan}><X className="w-3 h-3" /></button></span>
+                <span className="flex items-center gap-1.5"><RefreshCw className="w-3 h-3 animate-spin" />{scan.entries ? `${formatNumber(scan.entries)} items` : scan.message}<button className="btn btn-ghost !p-0.5" onClick={cancelScan}><X className="w-3 h-3" /></button></span>
               ) : (
-                <button className="flex items-center gap-1.5 transition-colors" style={{ color: 'var(--muted)' }} onClick={() => setStartScreen(true)} disabled={scanning}><RefreshCw className="w-3 h-3" /> New scan</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setStartScreen(true)} disabled={scanning}><RefreshCw className="w-3 h-3" /> Rescan</button>
               )}
-              {info?.codex_version && <span>{info.codex_version}</span>}
             </motion.div>
           )}
         </AnimatePresence>
@@ -225,6 +232,7 @@ export const App: React.FC = () => {
       <CleanModal />
       <CommandPalette />
       <Toasts />
+      <UpdatePrompt />
     </div>
   );
 };

@@ -153,7 +153,7 @@ export const openItemMenu = (e: React.MouseEvent | MouseEvent, it: MenuTarget) =
   const staged = s.isStaged(it.path);
   const protectedItem = it.category === 'protected';
   const name = it.name || it.path.split('/').pop() || it.path;
-  const inScan = s.page === 'explore' || s.page === 'files' ? true : it.path.startsWith(s.rootPath);
+  const inScan = s.page === 'explore' || s.page === 'junk' ? true : it.path.startsWith(s.rootPath);
 
   const entries: MenuEntry[] = [
     ...cleanupEntries(it),
@@ -171,7 +171,7 @@ export const openItemMenu = (e: React.MouseEvent | MouseEvent, it: MenuTarget) =
     { label: isDir ? 'Open in Finder' : 'Open', onSelect: () => api.open(it.path).catch((err) => s.toast({ kind: 'error', title: 'Could not open', detail: String(err) })) },
     { label: 'Reveal in Finder', onSelect: () => api.reveal(it.path).catch(() => {}) },
     'sep',
-    ...(s.advanced && (s.page === 'explore' || s.page === 'files') ? [{ label: 'Inspect', onSelect: () => s.select(it.path) } as MenuItem] : []),
+    ...(s.advanced && (s.page === 'explore' || s.page === 'junk') ? [{ label: 'Inspect', onSelect: () => s.select(it.path) } as MenuItem] : []),
     { label: 'Copy path', hint: shortPath(it.path, s.info?.home ?? ''), onSelect: async () => { if (await copyText(it.path)) s.toast({ kind: 'success', title: 'Path copied' }); } },
     { label: 'Copy name', onSelect: async () => { if (await copyText(name)) s.toast({ kind: 'success', title: 'Name copied' }); } },
     'sep',

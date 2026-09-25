@@ -10,7 +10,7 @@ import type { ActivityItem, ChatMessage, Suggestion } from '../types';
 
 const ACTIONS_RE = /```disko-actions\s*([\s\S]*?)```/g;
 
-function extractSuggestions(text: string): { clean: string; suggestions: Suggestion[] } {
+export function extractSuggestions(text: string): { clean: string; suggestions: Suggestion[] } {
   const suggestions: Suggestion[] = [];
   const clean = text
     .replace(ACTIONS_RE, (_, body) => {

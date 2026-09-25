@@ -22,6 +22,9 @@ import type {
   UnusedItem,
   VolumeInfo,
   RemnantsReport,
+  JunkItem,
+  DupGroup,
+  OldItem,
 } from '../types';
 
 export const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -35,6 +38,9 @@ export const api = {
   search: (query: string, limit = 40) => invoke<FileItem[]>('search_entries', { query, limit }),
   largestFiles: (limit = 40) => invoke<FileItem[]>('get_largest_files', { limit }),
   candidates: () => invoke<CandidateItem[]>('get_candidates'),
+  junk: (minBytes = 1 << 20) => invoke<JunkItem[]>('get_junk', { minBytes }),
+  timeline: () => invoke<OldItem[]>('get_timeline'),
+  duplicates: (minBytes = 1 << 20) => invoke<DupGroup[]>('find_duplicates', { minBytes }),
   unusedFiles: () => invoke<UnusedItem[]>('get_unused_files'),
   unusedApps: () => invoke<UnusedItem[]>('get_unused_apps'),
   remnants: (force = false) => invoke<RemnantsReport>('get_remnants', { force }),

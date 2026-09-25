@@ -112,119 +112,112 @@ export const ScanScreen: React.FC = () => {
     return <ProgressView onCancel={cancelScan} />;
   }
 
+  const targetName = target === 'home' ? 'home folder' : target === 'disk' ? 'whole disk' : folder ? folder.split('/').filter(Boolean).pop() ?? 'folder' : 'folder';
+
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-[720px] mx-auto px-8 pt-14 pb-16">
-        <h1 className="text-[22px] font-semibold tracking-tight">What would you like to look at?</h1>
-        <p className="text-[13px] mt-1.5" style={{ color: 'var(--muted)' }}>
-          A scan reads sizes and dates only. Your files are never changed. Only the latest completed scan is kept.
-        </p>
+      <div className="max-w-[560px] mx-auto px-8 pt-14 pb-16">
+        {active && (
+          <section className="mb-10">
+            <h1 className="text-[22px] font-semibold tracking-tight">Welcome back</h1>
+            <p className="text-[13px] mt-1" style={{ color: 'var(--muted)' }}>Pick up where you left off, or start a fresh scan below.</p>
+            <LastScan s={active} home={info?.home ?? ''} busy={busy === active.path} onOpen={() => openScan(active)} />
+          </section>
+        )}
+
+        <h2 className={active ? 'text-[15px] font-semibold' : 'text-[22px] font-semibold tracking-tight'}>{active ? 'New scan' : 'What should Disko scan?'}</h2>
+        <p className="text-[13px] mt-1" style={{ color: 'var(--muted)' }}>Disko only reads sizes and dates. Nothing is moved or deleted.</p>
 
         {fda === false && !fdaDismissed && (
-          <div className="mt-6 rounded-xl p-4 flex items-start gap-3" style={{ border: '1px solid var(--line-2)' }}>
+          <div className="mt-5 rounded-xl p-4 flex items-start gap-3" style={{ border: '1px solid var(--line-2)', background: 'var(--bg-2)' }}>
             <Lock className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: 'var(--muted)' }} />
             <div className="flex-1 min-w-0 text-[12.5px]">
-              <div className="font-medium">Grant Full Disk Access once</div>
+              <div className="font-medium">Allow Full Disk Access for complete results</div>
               <p className="mt-1 leading-relaxed" style={{ color: 'var(--muted)' }}>
-                Allow Disko to measure protected folders. Request access, then enable Disko in System Settings → Privacy &amp; Security → Full Disk Access. Protected folders are skipped until access is granted.
+                Without it, some protected folders are skipped. Turn on Disko in System Settings → Privacy &amp; Security → Full Disk Access.
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button className="btn btn-primary btn-sm" disabled={fdaBusy} onClick={requestAccess}>{fdaBusy ? 'Checking access…' : fdaRequested ? 'Request access again' : 'Request access'}</button>
-                <button className="btn btn-ghost btn-sm" disabled={fdaBusy} onClick={checkAccess}>Check again</button>
+                <button className="btn btn-primary btn-sm" disabled={fdaBusy} onClick={requestAccess}>{fdaBusy ? 'Checking…' : fdaRequested ? 'Open Settings again' : 'Open Settings'}</button>
+                <button className="btn btn-ghost btn-sm" disabled={fdaBusy} onClick={checkAccess}>I’ve turned it on</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => api.revealRunningApp().catch(e => setFdaMessage(errorText(e)))}>Show Disko in Finder</button>
+                <span className="flex-1" />
                 <button className="btn btn-ghost btn-sm" disabled={fdaBusy} onClick={() => setFdaDismissed(true)}>Not now</button>
               </div>
               {fdaMessage && <p role="status" className="mt-3 leading-relaxed" style={{ color: 'var(--muted)' }}>{fdaMessage}</p>}
-              <button className="btn btn-ghost btn-sm mt-2" onClick={() => api.revealRunningApp().catch(e => setFdaMessage(errorText(e)))}>Show Disko in Finder</button>
             </div>
           </div>
         )}
 
-        {fda === false && fdaDismissed && (
-          <button className="btn btn-ghost btn-sm mt-4" onClick={() => setFdaDismissed(false)}>Enable Full Disk Access…</button>
-        )}
-
-        {/* new scan */}
-        <div className="mt-8 grid grid-cols-3 gap-2">
-          <TargetCard icon={<Home className="w-4 h-4" />} title="Home folder" sub={shortPath(info?.home ?? '~', info?.home ?? '')} active={target === 'home'} onClick={() => setTarget('home')} />
-          <TargetCard icon={<HardDrive className="w-4 h-4" />} title="Whole disk" sub="Everything on this Mac" active={target === 'disk'} onClick={() => setTarget('disk')} />
-          <TargetCard icon={<FolderSearch className="w-4 h-4" />} title={folder ? folder.split('/').filter(Boolean).pop() ?? 'Folder' : 'A folder…'} sub={folder ? shortPath(folder, info?.home ?? '') : 'Pick any folder'} active={target === 'folder'} onClick={pickFolder} />
+        <div role="radiogroup" aria-label="What to scan" className="mt-5 rounded-xl overflow-hidden" style={{ border: '1px solid var(--line)', background: 'var(--bg-2)' }}>
+          <TargetRow icon={<Home className="w-[18px] h-[18px]" />} title="Home folder" sub="Your documents, apps’ data and caches. Best place to start." active={target === 'home'} onClick={() => setTarget('home')} />
+          <TargetRow icon={<HardDrive className="w-[18px] h-[18px]" />} title="Whole disk" sub="Everything on this Mac, including system files." active={target === 'disk'} onClick={() => setTarget('disk')} />
+          <TargetRow icon={<FolderSearch className="w-[18px] h-[18px]" />} title={folder ? folder.split('/').filter(Boolean).pop() ?? 'Folder' : 'A specific folder…'} sub={folder ? shortPath(folder, info?.home ?? '') : 'Choose any folder on this Mac.'} active={target === 'folder'} onClick={pickFolder} />
         </div>
 
-        <div className="mt-4 flex items-center gap-6 text-[12.5px]">
-          <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ border: '1px solid var(--line)' }}>
-            <ModeButton active={quick} onClick={() => setQuick(true)} title="Quick" sub="Measures everything, lists files over 256 KB" />
-            <ModeButton active={!quick} onClick={() => setQuick(false)} title="Thorough" sub="Lists every single file" />
-          </div>
-          <AnimatePresence>
+        <div className="mt-4 space-y-2.5">
+          <Check on={!quick} onChange={(v) => setQuick(!v)} label="List every file" hint="Slower. Otherwise files under 256 KB are counted but not listed." />
+          <AnimatePresence initial={false}>
             {target === 'disk' && (
-              <motion.button initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -6 }} className="flex items-center gap-2" style={{ color: admin ? 'var(--text)' : 'var(--muted)' }} onClick={() => setAdmin(!admin)}>
-                <span className={`switch ${admin ? 'on' : ''}`} />
-                <Shield className="w-3.5 h-3.5" /> Scan as administrator
-              </motion.button>
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <Check on={admin} onChange={setAdmin} label={<span className="inline-flex items-center gap-1.5"><Shield className="w-3.5 h-3.5" /> Scan as administrator</span>} hint="Also measures other users, system caches and swap. macOS will ask for your password. Cleanup stays limited to your home folder." />
+              </motion.div>
             )}
           </AnimatePresence>
-          <span className="flex-1" />
-          <button className="btn btn-primary !px-4" onClick={begin}>
-            Start {quick ? 'quick' : 'thorough'} scan
-          </button>
         </div>
-        {target === 'disk' && (
-          <p className="text-[11.5px] mt-3 leading-relaxed" style={{ color: 'var(--dim)' }}>
-            {admin
-              ? 'macOS will ask for your password. Administrator scans can see other users, system caches, swap and hidden space that a normal scan reports as unreadable. Cleanup stays limited to your home folder.'
-              : 'A normal whole-disk scan skips folders you cannot read. Turn on administrator mode to see them.'}{' '}
-            External, network and cloud drives are never included.
-          </p>
-        )}
 
-        {/* previous scans */}
-        {active && (
-          <div className="mt-10">
-            <div className="label mb-2">Last scan</div>
-            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--line)' }}>
-              <ScanRow s={active} home={info?.home ?? ''} busy={busy === active.path} onOpen={() => openScan(active)} />
-            </div>
-          </div>
+        <button className={`btn ${active ? '' : 'btn-primary'} w-full mt-6 !py-2.5 !text-[13px]`} onClick={begin}>
+          {target === 'folder' && !folder ? 'Choose a folder…' : `Scan ${targetName}`}
+        </button>
+        {target === 'disk' && (
+          <p className="text-[11.5px] mt-3 text-center" style={{ color: 'var(--dim)' }}>External, network and cloud drives are not included.</p>
+        )}
+        {fda === false && fdaDismissed && (
+          <button className="btn btn-ghost btn-sm mt-3 mx-auto flex" onClick={() => setFdaDismissed(false)}><Lock className="w-3 h-3" /> Enable Full Disk Access…</button>
         )}
       </div>
     </div>
   );
 };
 
-const TargetCard: React.FC<{ icon: React.ReactNode; title: string; sub: string; active: boolean; onClick: () => void }> = ({ icon, title, sub, active, onClick }) => (
-  <button onClick={onClick} className="text-left rounded-xl p-3.5 transition-colors" style={{ border: `1px solid ${active ? 'var(--text)' : 'var(--line)'}`, background: active ? 'var(--bg-2)' : 'transparent' }}>
-    <span className="flex items-center gap-2 text-[13px] font-medium">
-      <span style={{ color: active ? 'var(--text)' : 'var(--muted)' }}>{icon}</span>
-      {title}
+const TargetRow: React.FC<{ icon: React.ReactNode; title: string; sub: string; active: boolean; onClick: () => void }> = ({ icon, title, sub, active, onClick }) => (
+  <button role="radio" aria-checked={active} onClick={onClick} className="scan-target w-full flex items-center gap-3.5 px-4 py-3.5 text-left transition-colors">
+    <span className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ background: active ? 'var(--text)' : 'var(--bg-3)', color: active ? 'var(--bg)' : 'var(--muted)' }}>{icon}</span>
+    <span className="flex-1 min-w-0">
+      <span className="block text-[13.5px] font-medium">{title}</span>
+      <span className="block text-[12px] mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{sub}</span>
     </span>
-    <span className="block text-[11.5px] mt-1 truncate" style={{ color: 'var(--dim)' }}>{sub}</span>
+    <span className="w-[18px] h-[18px] rounded-full flex-shrink-0 flex items-center justify-center" style={{ border: `1.5px solid ${active ? 'var(--text)' : 'var(--line-2)'}` }}>
+      {active && <span className="w-2 h-2 rounded-full" style={{ background: 'var(--text)' }} />}
+    </span>
   </button>
 );
 
-const ModeButton: React.FC<{ active: boolean; onClick: () => void; title: string; sub: string }> = ({ active, onClick, title, sub }) => (
-  <button onClick={onClick} className="text-left px-3 py-1.5 rounded-md transition-colors" style={{ background: active ? 'var(--bg-3)' : 'transparent', color: active ? 'var(--text)' : 'var(--muted)' }} title={sub}>
-    <span className="block text-[12.5px] font-medium">{title}</span>
-    <span className="block text-[10.5px]" style={{ color: 'var(--dim)' }}>{sub}</span>
-  </button>
+const Check: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: React.ReactNode; hint: string }> = ({ on, onChange, label, hint }) => (
+  <label className="flex items-start gap-2.5 cursor-default px-1">
+    <input type="checkbox" className="mt-[3px]" checked={on} onChange={(e) => onChange(e.target.checked)} />
+    <span className="text-[12.5px]">
+      <span className="font-medium">{label}</span>
+      <span className="block text-[11.5px] mt-0.5 leading-relaxed" style={{ color: 'var(--dim)' }}>{hint}</span>
+    </span>
+  </label>
 );
 
-const ScanRow: React.FC<{ s: ScanInfo; home: string; busy: boolean; onOpen: () => void }> = ({ s, home, busy, onOpen }) => {
-  const label = s.root === '/' ? 'Whole disk' : s.root === home ? 'Home folder' : shortPath(s.root, home);
+const LastScan: React.FC<{ s: ScanInfo; home: string; busy: boolean; onOpen: () => void }> = ({ s, home, busy, onOpen }) => {
+  const isDisk = s.root === '/';
+  const label = isDisk ? 'Whole disk' : s.root === home ? 'Home folder' : shortPath(s.root, home);
   return (
-    <div className="group flex items-center gap-3 px-4 h-14 row-hover">
-      <div className="flex-1 min-w-0">
-        <div className="text-[13px] font-medium flex items-center gap-2">
-          {label}
-          <span className="chip">{s.mode === 'quick' ? 'quick' : 'thorough'}</span>
-        </div>
-        <div className="text-[11.5px] tnum mt-0.5" style={{ color: 'var(--dim)' }}>
-          {s.finished ? relativeTime(s.finished) : 'incomplete'} · {s.entries ? `${formatNumber(s.entries)} entries` : '—'} · {formatBytes(s.size_bytes)} on disk
-        </div>
-      </div>
-      <button className="btn btn-primary" onClick={onOpen} disabled={busy || !s.complete}>
-        Continue <ChevronRight className="w-3.5 h-3.5" />
-      </button>
-    </div>
+    <button className="scan-last group mt-5 w-full flex items-center gap-3.5 rounded-xl px-4 py-3.5 text-left transition-colors" onClick={onOpen} disabled={busy || !s.complete}>
+      <span className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ background: 'var(--bg-3)', color: 'var(--text)' }}>
+        {isDisk ? <HardDrive className="w-[18px] h-[18px]" /> : s.root === home ? <Home className="w-[18px] h-[18px]" /> : <FolderSearch className="w-[18px] h-[18px]" />}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[13.5px] font-medium truncate">{label}</span>
+        <span className="block text-[12px] tnum mt-0.5" style={{ color: 'var(--muted)' }}>
+          {s.complete ? `Scanned ${relativeTime(s.finished)}` : 'Incomplete'}{s.entries ? ` · ${formatNumber(s.entries)} items` : ''}{s.mode === 'quick' ? '' : ' · every file'}
+        </span>
+      </span>
+      <span className="btn btn-primary pointer-events-none">{busy ? 'Opening…' : 'Open'} <ChevronRight className="w-3.5 h-3.5" /></span>
+    </button>
   );
 };
 
