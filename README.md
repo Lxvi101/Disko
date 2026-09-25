@@ -10,19 +10,23 @@ Most of it was Xcode, honestly. Simulators you forgot about, device support file
 
 [Watch the full launch video (with sound)](docs/launch.mp4)
 
+## Download
+
+Grab the latest `.dmg` from [Releases](https://github.com/Lxvi101/Disko/releases/latest). It's a universal build (Apple Silicon and Intel), signed and notarized, so it opens without the usual Gatekeeper fight. From 0.2.0 on it updates itself.
+
 ## What it does
 
-- **Explore:** scan your home folder (or the whole disk) and click through a sunburst of where the space went
-- **Suggestions:** caches, build output and other junk that gets rebuilt anyway, with a reason for every item
-- **Inactive:** big files you haven't touched in months
-- **Xcode:** simulators, device support, DerivedData, archives and caches, broken down one by one
-- **App cleanup:** leftovers from apps you uninstalled, plus old versions some apps leave lying around (Adobe, Cursor, Claude Code, etc.)
+- **Map:** scan your home folder (or the whole disk) and click through a sunburst of where the space went
+- **Junk:** every `node_modules`, Python venv, build folder, cache, log and old installer, one row each. Sort by size or by age, filter by kind, select a bunch and clean them in one go
+- **Suggestions:** the less obvious stuff. *AI picks* has Codex dig through your scan for forgotten projects, videos, toolchains and backups. *Duplicates* finds identical photos, videos, documents and installers (compared byte by byte, not just by name). *Leftovers* is what uninstalled apps left behind
+- **Timeline:** a chart of when you last actually used your apps, projects, big files, downloads, simulators, Node/Rust/Python versions and iPhone backups. Pick a cutoff like "a year" and see what's been sitting there. For old projects it only clears the dependencies and build output, never your code
+- **Apps:** laid out like the App Store, ranked by how much space each app is hiding. Xcode gets its own page for simulators, device support, DerivedData, archives and caches, broken down one by one. Also Adobe caches, old Cursor and Claude Code versions, browser caches and more
 - **Quarantine:** nothing gets deleted straight away. Stuff goes to quarantine first so you can restore it if something breaks. Empty it when you're sure.
 - **Assistant:** optional. If you have the [Codex CLI](https://github.com/openai/codex) installed, it can read your scan and explain what's worth removing. It's read-only and can't delete anything itself.
 
 It's careful on purpose. Passwords, browser profiles, Photos, Mail, iCloud folders and system files are never offered for removal. Things with their own cleanup command (npm, pnpm, Homebrew, uv...) point you to that command instead of just deleting folders.
 
-## Running it
+## Building it yourself
 
 You need macOS 12+, [Rust](https://rustup.rs) and [Bun](https://bun.sh).
 
@@ -63,6 +67,7 @@ bun run render:readme   # the GIF at the top of this README
 
 ```sh
 python3 -m unittest discover -s tests
+node --test tests/app-cleanup.test.ts
 cd src-tauri && cargo test
 ```
 
@@ -71,8 +76,8 @@ cd src-tauri && cargo test
 Lots. Off the top of my head:
 
 - macOS only, and only tested on my own machine
-- no signed or notarized release yet, so you have to build it yourself
 - the rule list for what counts as junk could be way bigger
+- "last used" dates come from Spotlight and file timestamps, so they're a good hint, not proof
 - scanning the whole disk is slow-ish on huge drives
 - the "free space" numbers are estimates, since APFS snapshots and shared blocks mess with what you actually get back
 - the UI has rough edges
