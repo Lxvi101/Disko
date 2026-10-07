@@ -274,6 +274,15 @@ export interface ScanProgress {
   ok: boolean;
 }
 
+export interface CleanupProgress {
+  index: number;
+  count: number;
+  finished: number;
+  path: string;
+  done_bytes: number;
+  total_bytes: number;
+}
+
 export interface ScanInfo {
   path: string;
   file: string;

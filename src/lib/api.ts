@@ -18,6 +18,7 @@ import type {
   ScanInfo,
   ScanMeta,
   ScanProgress,
+  CleanupProgress,
   TreeNode,
   UnusedItem,
   VolumeInfo,
@@ -78,6 +79,9 @@ export const onCodexEvent = (cb: (p: CodexEventPayload) => void): Promise<Unlist
 
 export const onScanProgress = (cb: (p: ScanProgress) => void): Promise<UnlistenFn> =>
   listen<ScanProgress>('scan-progress', (e) => cb(e.payload));
+
+export const onCleanupProgress = (cb: (p: CleanupProgress) => void): Promise<UnlistenFn> =>
+  listen<CleanupProgress>('cleanup-progress', (e) => cb(e.payload));
 
 /// Fires once when a scan written by an older rule set has been brought up to date in place.
 export const onScanReclassified = (cb: (rows: number) => void): Promise<UnlistenFn> =>

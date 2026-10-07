@@ -1820,31 +1820,90 @@ struct DeleteResult { deleted_items: Vec<String>, failures: Vec<CleanupFailure>,
 struct CleanupFailure { path: String, error: String }
 static CLEANUP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn delete_items_sync(items: Vec<QuarantineInput>) -> Result<DeleteResult, String> {
+/// Streamed to the UI as `cleanup-progress` while a delete or quarantine runs.
+/// `total_bytes` is the sum of the sizes the UI sent; `done_bytes` never exceeds it.
+#[derive(Debug, Clone, Serialize)]
+struct CleanupProgress { index: usize, count: usize, finished: usize, path: String, done_bytes: u64, total_bytes: u64 }
+
+/// Tracks batch progress and throttles emits so large trees don't flood the webview.
+struct ProgressReporter<'a> {
+    emit: &'a mut dyn FnMut(CleanupProgress),
+    sizes: Vec<u64>,
+    total: u64,
+    base: u64,
+    last: Option<std::time::Instant>,
+}
+
+impl<'a> ProgressReporter<'a> {
+    fn new(items: &[QuarantineInput], emit: &'a mut dyn FnMut(CleanupProgress)) -> Self {
+        let sizes: Vec<u64> = items.iter().map(|i| i.size).collect();
+        let total = sizes.iter().sum();
+        Self { emit, sizes, total, base: 0, last: None }
+    }
+    fn send(&mut self, index: usize, finished: usize, path: &str, within: u64, force: bool) {
+        if !force && self.last.map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(60)) { return; }
+        self.last = Some(std::time::Instant::now());
+        let within = within.min(self.sizes.get(index).copied().unwrap_or(0));
+        let done_bytes = (self.base + within).min(self.total);
+        (self.emit)(CleanupProgress { index, count: self.sizes.len(), finished, path: path.to_string(), done_bytes, total_bytes: self.total });
+    }
+    fn start(&mut self, index: usize, path: &str) { self.send(index, index, path, 0, true); }
+    fn advance(&mut self, index: usize, path: &str, within: u64) { self.send(index, index, path, within, false); }
+    fn finish(&mut self, index: usize, path: &str) {
+        self.base += self.sizes.get(index).copied().unwrap_or(0);
+        self.send(index, index + 1, path, 0, true);
+    }
+}
+
+/// Removes a tree in subtrees two levels down so progress can be reported while it runs.
+/// Links are unlinked, never followed; each subtree still goes through `remove_dir_all`.
+fn remove_tree_reporting(path: &Path, depth: u8, freed: &mut u64, on_chunk: &mut dyn FnMut(u64)) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if !meta.is_dir() || depth == 0 {
+        let (size, _) = xcode::allocated_size(path);
+        if meta.is_dir() { fs::remove_dir_all(path)?; } else { fs::remove_file(path)?; }
+        *freed += size;
+        on_chunk(*freed);
+        return Ok(());
+    }
+    for entry in fs::read_dir(path)? {
+        remove_tree_reporting(&entry?.path(), depth - 1, freed, on_chunk)?;
+    }
+    *freed += std::os::unix::fs::MetadataExt::blocks(&meta) * 512;
+    fs::remove_dir(path)
+}
+
+fn delete_items_sync(items: Vec<QuarantineInput>, emit: &mut dyn FnMut(CleanupProgress)) -> Result<DeleteResult, String> {
     let _guard = CLEANUP_LOCK.lock().map_err(|_| "Cleanup lock unavailable".to_string())?;
     let home = home_dir();
-    let result = delete_items_at(items, &home)?;
+    let result = delete_items_at(items, &home, emit)?;
     let _ = detach_scan_entries(&result.deleted_items);
     Ok(result)
 }
 
-fn delete_items_at(items: Vec<QuarantineInput>, home: &Path) -> Result<DeleteResult, String> {
+fn delete_items_at(items: Vec<QuarantineInput>, home: &Path, emit: &mut dyn FnMut(CleanupProgress)) -> Result<DeleteResult, String> {
     validate_cleanup_items(&items, home)?;
+    let mut progress = ProgressReporter::new(&items, emit);
     let mut result = DeleteResult { deleted_items: vec![], failures: vec![], total_bytes: 0 };
-    for item in items {
+    for (index, item) in items.into_iter().enumerate() {
         let path = Path::new(&item.path);
+        progress.start(index, &item.path);
         let outcome = (|| -> Result<u64, String> {
             validate_cleanup_items(std::slice::from_ref(&item), &home)?;
-            let meta = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-            let (size, _) = xcode::allocated_size(path);
+            let mut freed = 0u64;
             if let Some(id) = xcode::check_simulator(path, &home)? {
+                freed = xcode::allocated_size(path).0;
                 xcode::delete_simulator(&id, &home)?;
-            } else if meta.is_dir() {
-                fs::remove_dir_all(path).map_err(|e| format!("{}; some files may already have been removed. Rescan before retrying.", e))?;
-            } else { fs::remove_file(path).map_err(|e| e.to_string())?; }
+            } else {
+                let meta = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+                remove_tree_reporting(path, 2, &mut freed, &mut |within| progress.advance(index, &item.path, within)).map_err(|e| {
+                    if meta.is_dir() { format!("{}; some files may already have been removed. Rescan before retrying.", e) } else { e.to_string() }
+                })?;
+            }
             if path.exists() { return Err("The item is still present; refresh and inspect it before trying again".into()); }
-            Ok(size)
+            Ok(freed)
         })();
+        progress.finish(index, &item.path);
         match outcome {
             Ok(size) => { result.total_bytes += size; result.deleted_items.push(item.path); }
             Err(error) => result.failures.push(CleanupFailure { path: item.path, error }),
@@ -1854,8 +1913,9 @@ fn delete_items_at(items: Vec<QuarantineInput>, home: &Path) -> Result<DeleteRes
 }
 
 #[tauri::command]
-async fn delete_items(items: Vec<QuarantineInput>) -> Result<DeleteResult, String> {
-    tauri::async_runtime::spawn_blocking(move || delete_items_sync(items)).await.map_err(|e| e.to_string())?
+async fn delete_items(app: AppHandle, items: Vec<QuarantineInput>) -> Result<DeleteResult, String> {
+    tauri::async_runtime::spawn_blocking(move || delete_items_sync(items, &mut |p| { let _ = app.emit("cleanup-progress", p); }))
+        .await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
 async fn get_app_cleanup_storage(app_id: String) -> Result<app_cleanup::Inventory, String> {
@@ -1866,7 +1926,7 @@ async fn get_xcode_storage() -> Result<xcode::Inventory, String> {
     tauri::async_runtime::spawn_blocking(move || xcode::inventory(&home_dir())).await.map_err(|e| e.to_string())
 }
 
-fn safe_quarantine_items_sync(items: Vec<QuarantineInput>) -> Result<QuarantineResult, String> {
+fn safe_quarantine_items_sync(items: Vec<QuarantineInput>, emit: &mut dyn FnMut(CleanupProgress)) -> Result<QuarantineResult, String> {
     let _guard = CLEANUP_LOCK.lock().map_err(|_| "Cleanup lock unavailable".to_string())?;
     let home = home_dir();
     if items.is_empty() {
@@ -1884,20 +1944,25 @@ fn safe_quarantine_items_sync(items: Vec<QuarantineInput>) -> Result<QuarantineR
     let mut skipped = Vec::new();
     let mut entries = Vec::new();
     let mut total_bytes = 0u64;
+    let mut progress = ProgressReporter::new(&items, emit);
 
     for (idx, it) in items.iter().enumerate() {
+        progress.start(idx, &it.path);
         let p = Path::new(&it.path);
         if !p.exists() {
             skipped.push(it.path.clone());
+            progress.finish(idx, &it.path);
             continue;
         }
         let dest = trash_dir.join(format!("{:03}-{}", idx, file_name_of(&it.path)));
         if dest.exists() {
             skipped.push(it.path.clone());
+            progress.finish(idx, &it.path);
             continue;
         }
         let moved_result = validate_cleanup_items(std::slice::from_ref(it), &home)
             .and_then(|_| fs::rename(p, &dest).map_err(|e| e.to_string()));
+        progress.finish(idx, &it.path);
         match moved_result {
             Ok(()) => {
                 total_bytes += it.size;
@@ -2398,8 +2463,8 @@ async fn open_in_terminal(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn safe_quarantine_items(items: Vec<QuarantineInput>) -> Result<QuarantineResult, String> {
-    tauri::async_runtime::spawn_blocking(move || safe_quarantine_items_sync(items))
+async fn safe_quarantine_items(app: AppHandle, items: Vec<QuarantineInput>) -> Result<QuarantineResult, String> {
+    tauri::async_runtime::spawn_blocking(move || safe_quarantine_items_sync(items, &mut |p| { let _ = app.emit("cleanup-progress", p); }))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -2583,7 +2648,11 @@ mod cleanup_tests {
         // A link inside the selected tree is unlinked, never followed to its target.
         symlink(&kept, selected.join("alias")).unwrap();
         let missing = home.join("Downloads/gone");
-        let result = delete_items_at(vec![item(&selected), item(&missing)], &home).unwrap();
+        let mut events = Vec::new();
+        let result = delete_items_at(vec![item(&selected), item(&missing)], &home, &mut |p| events.push(p)).unwrap();
+        let last = events.last().unwrap();
+        assert_eq!((last.finished, last.count), (2, 2), "progress reaches the end even when an item fails");
+        assert!(events.windows(2).all(|w| w[0].done_bytes <= w[1].done_bytes && w[1].done_bytes <= w[1].total_bytes));
         assert_eq!(result.deleted_items, vec![selected.to_string_lossy().to_string()]);
         assert_eq!(result.failures.len(), 1);
         assert!(!selected.exists());
@@ -2609,7 +2678,7 @@ mod cleanup_tests {
             vec![item(&target), item(&target)],
             vec![item(&home.join(".ssh"))],
             vec![item(&home.join("Library/Developer/CoreSimulator"))],
-        ] { assert!(delete_items_at(paths, &home).is_err()); assert!(target.join("file").exists()); }
+        ] { assert!(delete_items_at(paths, &home, &mut |_| {}).is_err()); assert!(target.join("file").exists()); }
         fs::remove_dir_all(home).unwrap();
     }
 }

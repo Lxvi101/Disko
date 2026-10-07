@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Eye, Sparkles } from 'lucide-react';
+import { X, Eye, Sparkles, Archive, Trash2, Check } from 'lucide-react';
 import { useStore } from '../store';
-import { api, errorText } from '../lib/api';
+import { api, errorText, onCleanupProgress } from '../lib/api';
 import { formatBytes, shortPath, catMeta } from '../lib/format';
 import { Modal, Spinner } from './ui';
-import type { StagedItem } from '../types';
+import type { CleanupProgress, StagedItem } from '../types';
 import { openItemMenu } from './ContextMenu';
 
 export const Collector: React.FC = () => {
@@ -116,19 +116,35 @@ export const Collector: React.FC = () => {
   );
 };
 
+const MODES = {
+  quarantine: { label: 'Quarantine', icon: Archive, verb: 'Quarantine', doing: 'Moving to quarantine', note: 'Recoverable from Quarantine. Space is freed when you purge.' },
+  delete: { label: 'Delete permanently', icon: Trash2, verb: 'Delete', doing: 'Deleting', note: 'Frees space now. Bypasses Trash and cannot be undone.' },
+} as const;
+
 export const CleanModal: React.FC = () => {
   const { staged: collection, cleanupSelection, cleanModalOpen, setCleanModalOpen, refreshCurrent, reloadData, info, setPage, advanced, cleanupMode: mode, cleanupBusy: busy } = useStore();
   const staged = cleanupSelection ?? collection;
   const hasSimulator = staged.some((s) => s.path.includes('/CoreSimulator/Devices/'));
   const [result, setResult] = useState<{ paths: string[]; bytes: number; failures: { path: string; error: string }[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<CleanupProgress | null>(null);
+  const [items, setItems] = useState<StagedItem[]>([]);
   const total = staged.reduce((a, b) => a + b.total, 0);
-  useEffect(() => { if (cleanModalOpen) { setResult(null); setError(null); } }, [cleanModalOpen]);
+  useEffect(() => { if (cleanModalOpen) { setResult(null); setError(null); setProgress(null); } }, [cleanModalOpen]);
   const close = () => { if (!busy) setCleanModalOpen(false); };
+  const m = MODES[mode];
+  // Keep the batch on screen while it runs: removing items from the collection must not reshuffle the list.
+  const list = busy || result ? items : staged;
+  const listTotal = list.reduce((a, b) => a + b.total, 0);
+  const finishing = busy && !!progress && progress.finished >= progress.count;
+  const fraction = !progress ? 0 : progress.total_bytes > 0 ? progress.done_bytes / progress.total_bytes : progress.finished / Math.max(progress.count, 1);
   const run = async () => {
     if (useStore.getState().cleanupBusy) return;
     useStore.setState({ cleanupBusy: true });
     setError(null);
+    setItems(staged);
+    setProgress({ index: 0, count: staged.length, finished: 0, path: staged[0]?.path ?? '', done_bytes: 0, total_bytes: total });
+    const unlisten = await onCleanupProgress(setProgress).catch(() => null);
     try {
       const items = staged.map((s) => ({ path: s.path, size: s.total }));
       let outcome;
@@ -143,50 +159,87 @@ export const CleanModal: React.FC = () => {
       useStore.setState((s) => ({ staged: s.staged.filter((i) => !outcome.paths.includes(i.path)) }));
     } catch (e) { setError(errorText(e)); }
     finally {
+      unlisten?.();
       const versionBeforeRefresh = useStore.getState().dataVersion;
       await Promise.allSettled([reloadData(), refreshCurrent(), api.volume().then((volume) => useStore.setState((s) => ({ info: s.info ? { ...s.info, volume } : null, overview: s.overview ? { ...s.overview, volume } : null })))]);
       useStore.setState((s) => ({ cleanupBusy: false, dataVersion: s.dataVersion + (s.dataVersion === versionBeforeRefresh ? 1 : 0) }));
     }
   };
+  const simulatorNote = mode === 'delete' ? 'Simulator apps and their data are lost; shared OS runtimes remain installed.' : 'Keep Xcode, Simulator and agents closed until you restore or purge. Restoring cannot replace a device recreated at the same path.';
+  const current = progress ? list[Math.min(progress.index, list.length - 1)] : undefined;
   return (
-    <Modal open={cleanModalOpen} onClose={close} locked={busy} width={570}
-      title={result ? (result.failures.length ? 'Cleanup completed with exceptions' : mode === 'delete' ? 'Permanently deleted' : 'Moved to quarantine') : `Clean up ${formatBytes(total)}`}
-      subtitle={result ? `${result.paths.length} items ${mode === 'delete' ? 'deleted' : 'moved'}.` : `${staged.length} selected item${staged.length === 1 ? '' : 's'} · choose how to remove them`}
+    <Modal open={cleanModalOpen} onClose={close} locked={busy} width={520}
+      title={result ? (result.failures.length ? 'Cleanup finished with problems' : mode === 'delete' ? 'Deleted' : 'Moved to quarantine')
+        : busy ? `${m.doing}…` : `Clean up ${formatBytes(total)}`}
+      subtitle={result ? `${result.paths.length} of ${list.length} item${list.length === 1 ? '' : 's'} ${mode === 'delete' ? 'deleted' : 'moved'}`
+        : busy ? (finishing ? 'Finishing up…' : progress && current ? `${Math.min(progress.index + 1, progress.count)} of ${progress.count} · ${current.name}` : 'Starting…')
+        : `${staged.length} item${staged.length === 1 ? '' : 's'}`}
       footer={result ? <>
-        {mode === 'quarantine' && <button className="btn" disabled={busy} onClick={() => { close(); setPage('quarantine'); }}>Open quarantine</button>}
-        <button className="btn btn-primary" disabled={busy} onClick={close}>Done</button>
-      </> : <>
-        <button className="btn btn-ghost" onClick={close} disabled={busy}>Cancel</button>
-        <button className="btn btn-primary" style={mode === 'delete' ? { background: 'var(--danger)', color: '#fff' } : undefined} onClick={run} disabled={busy || staged.length === 0}>
-          {busy && <Spinner />} {busy ? 'Cleaning…' : mode === 'delete' ? 'Delete permanently' : 'Move to quarantine'}
+        {mode === 'quarantine' && <button className="btn" onClick={() => { close(); setPage('quarantine'); }}>Open quarantine</button>}
+        <button className="btn btn-primary" onClick={close}>Done</button>
+      </> : busy ? (
+        <span className="mr-auto text-[12px]" style={{ color: 'var(--muted)' }}>Keep Disko open until this finishes.</span>
+      ) : <>
+        <button className="btn btn-ghost" onClick={close}>Cancel</button>
+        <button className="btn btn-primary" style={mode === 'delete' ? { background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' } : undefined} onClick={run} disabled={staged.length === 0}>
+          {m.verb} {formatBytes(total)}
         </button>
       </>}>
       {result ? <div>
-        <div className="tnum text-[32px] font-medium">{formatBytes(result.bytes)}</div>
-        {hasSimulator && <p className="text-[12px] mt-2" style={{ color: 'var(--warn)' }}>{mode === 'delete' ? 'Simulator apps and their data are lost; shared OS runtimes remain installed.' : 'Keep Xcode, Simulator and agents closed until you restore or purge. Restoring cannot replace a device recreated at the same path.'}</p>}
-        <p className="text-[12px] mt-2" style={{ color: 'var(--muted)' }}>{mode === 'delete' ? 'Removed directly, without Trash or a restore journal. Available disk space may differ because of APFS snapshots and shared blocks.' : 'Recoverable from Quarantine. Space is reclaimed only after purging.'}</p>
+        <div className="flex items-baseline gap-2">
+          <span className="tnum text-[32px] font-medium">{formatBytes(result.bytes)}</span>
+          <span className="text-[13px]" style={{ color: 'var(--muted)' }}>{mode === 'delete' ? 'freed' : 'quarantined'}</span>
+        </div>
+        <p className="text-[12px] mt-1" style={{ color: 'var(--muted)' }}>{mode === 'delete' ? 'Free space may differ slightly because of APFS snapshots and shared blocks.' : 'Restore from Quarantine, or purge there to free the space.'}</p>
+        {hasSimulator && <p className="text-[12px] mt-2" style={{ color: 'var(--warn)' }}>{simulatorNote}</p>}
         {result.failures.map((f) => <p key={f.path} className="text-[12px] mt-3 break-all selectable" style={{ color: 'var(--warn)' }}>{shortPath(f.path, info?.home ?? '')}: {f.error}</p>)}
       </div> : <div>
-        <div className="grid grid-cols-2 gap-2 mb-4" role="group" aria-label="Cleanup method">
-          {(['quarantine', 'delete'] as const).map((value) => <button key={value} disabled={busy} aria-pressed={mode === value} onClick={() => useStore.setState({ cleanupMode: value })}
-            className="card p-3 text-left" style={{ borderColor: mode === value ? (value === 'delete' ? 'var(--danger)' : 'var(--text)') : undefined }}>
-            <span className="text-[13px] font-semibold">{value === 'delete' ? 'Delete permanently' : 'Quarantine'}</span>
-            <span className="block text-[11.5px] mt-1" style={{ color: 'var(--muted)' }}>{value === 'delete' ? 'Reclaim space now. Cannot be undone.' : 'Keep a recoverable copy in Trash.'}</span>
-          </button>)}
-        </div>
-        <div className="max-h-56 overflow-y-auto">
-          {staged.map((s) => <div key={s.path} className="flex items-center gap-2 py-2 text-[12.5px]">
-            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: catMeta(s.category).color }} />
-            <div className="flex-1 min-w-0"><div className="truncate" title={s.path}>{advanced ? shortPath(s.path, info?.home ?? '') : s.name}</div>
-            {s.reason && <p className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>{s.reason}</p>}</div>
-            <span className="tnum">{formatBytes(s.total)}</span>
-          </div>)}
-        </div>
-        <p className="text-[12px] mt-3 leading-relaxed" style={{ color: mode === 'delete' ? 'var(--danger)' : 'var(--muted)' }}>
-          {mode === 'delete' ? 'These items will be permanently removed in one operation, bypassing Trash. Disko cannot restore them.' : 'Items move to ~/.Trash/disko-… with a recovery journal. Restore them from Quarantine, or purge them later to reclaim space.'}
-        </p>
-        {hasSimulator && <p className="text-[12px] mt-2" style={{ color: 'var(--warn)' }}>{mode === 'delete' ? 'Simulator apps and their data are lost; shared OS runtimes remain installed.' : 'Keep Xcode, Simulator and agents closed until you restore or purge. Restoring cannot replace a device recreated at the same path.'}</p>}
-        <p className="text-[12px] mt-2" style={{ color: 'var(--muted)' }}>Stop builds and agents and quit the apps that own these files before cleanup.</p>
+        {busy ? <div aria-live="polite">
+          <div className="flex items-baseline justify-between">
+            <span className="tnum text-[13px]">{formatBytes(progress?.done_bytes ?? 0)} <span style={{ color: 'var(--muted)' }}>of {formatBytes(progress?.total_bytes ?? listTotal)}</span></span>
+            <span className="tnum text-[12px]" style={{ color: 'var(--muted)' }}>{Math.round(fraction * 100)}%</span>
+          </div>
+          <div className="h-1.5 rounded-full mt-2 overflow-hidden" style={{ background: 'var(--bg-3)' }} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)}>
+            <motion.div className={`h-full rounded-full ${finishing ? 'shimmer' : ''}`} style={{ background: finishing ? undefined : mode === 'delete' ? 'var(--danger)' : 'var(--text)' }}
+              initial={false} animate={{ width: `${Math.max(fraction, 0.01) * 100}%` }} transition={{ ease: 'easeOut', duration: 0.35 }} />
+          </div>
+        </div> : <>
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-3)' }} role="group" aria-label="Cleanup method">
+            {(['quarantine', 'delete'] as const).map((value) => {
+              const active = mode === value;
+              const Icon = MODES[value].icon;
+              return <button key={value} aria-pressed={active} onClick={() => useStore.setState({ cleanupMode: value })}
+                className="relative h-8 rounded-md text-[12.5px] font-medium transition-colors" style={{ color: active ? (value === 'delete' ? 'var(--danger)' : 'var(--text)') : 'var(--muted)' }}>
+                {active && <motion.span layoutId="clean-mode-bg" className="absolute inset-0 rounded-md" style={{ background: 'var(--bg-2)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
+                <span className="relative flex items-center justify-center gap-1.5"><Icon className="w-3.5 h-3.5" />{MODES[value].label}</span>
+              </button>;
+            })}
+          </div>
+          <p className="text-[12px] mt-2" style={{ color: mode === 'delete' ? 'var(--danger)' : 'var(--muted)' }}>{m.note}</p>
+        </>}
+
+        <ul className="mt-4 -mx-2 max-h-60 overflow-y-auto">
+          {list.map((s, i) => {
+            const state = !busy || !progress ? 'idle' : i < progress.finished ? 'done' : i === progress.index ? 'active' : 'pending';
+            return <li key={s.path} className="flex items-center gap-3 px-2 py-1.5 rounded-md transition-opacity" title={[s.path, s.reason].filter(Boolean).join('\n')} style={{ opacity: state === 'pending' ? 0.45 : 1 }}>
+              <span className="w-3.5 flex items-center justify-center flex-shrink-0">
+                {state === 'done' ? <Check className="w-3.5 h-3.5" style={{ color: 'var(--ok)' }} />
+                  : state === 'active' ? <Spinner size={12} />
+                  : <span className="w-2 h-2 rounded-full" style={{ background: catMeta(s.category).color }} />}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12.5px] truncate">{s.name}</div>
+                {(advanced || s.reason) && <div className={`text-[11px] truncate ${advanced ? 'mono' : ''}`} style={{ color: 'var(--dim)' }}>{advanced ? shortPath(s.path, info?.home ?? '') : s.reason}</div>}
+              </div>
+              <span className="tnum text-[12px] flex-shrink-0" style={{ color: 'var(--muted)' }}>{s.total ? formatBytes(s.total) : '—'}</span>
+            </li>;
+          })}
+        </ul>
+
+        {!busy && <>
+          {hasSimulator && <p className="text-[12px] mt-3" style={{ color: 'var(--warn)' }}>{simulatorNote}</p>}
+          <p className="text-[11.5px] mt-3" style={{ color: 'var(--dim)' }}>Quit apps and stop builds that use these files first.</p>
+        </>}
         {error && <p role="alert" className="text-[12px] mt-3 selectable" style={{ color: 'var(--danger)' }}>{error}</p>}
       </div>}
     </Modal>
