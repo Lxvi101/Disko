@@ -2,6 +2,7 @@ pub mod classify;
 mod disk_access;
 mod remnants;
 mod reports;
+mod bulkdir;
 mod scanner;
 mod scan_storage;
 mod xcode;
@@ -243,6 +244,11 @@ pub struct ScanProgress {
     pub elapsed_ms: u64,
     pub done: bool,
     pub ok: bool,
+    /// Live preview while walking; empty in other phases (the UI keeps the last one).
+    #[serde(default)]
+    pub top: Vec<scanner::LiveFolder>,
+    #[serde(default)]
+    pub junk: Vec<scanner::LiveJunk>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1303,7 +1309,7 @@ fn emit_scan(app: &AppHandle, p: ScanProgress) {
 }
 
 fn simple_progress(phase: &str, message: &str, done: bool, ok: bool) -> ScanProgress {
-    ScanProgress { phase: phase.into(), message: message.into(), entries: 0, dirs: 0, bytes: 0, current: String::new(), elapsed_ms: 0, done, ok }
+    ScanProgress { phase: phase.into(), message: message.into(), entries: 0, dirs: 0, bytes: 0, current: String::new(), elapsed_ms: 0, done, ok, top: vec![], junk: vec![] }
 }
 
 fn slug(root: &str) -> String {
@@ -1579,7 +1585,7 @@ async fn run_scan_once(app: &AppHandle, state: &State<'_, ProcState>, root: Stri
             while !stop2.load(std::sync::atomic::Ordering::Relaxed) {
                 if let Ok(txt) = fs::read_to_string(&pf) {
                     if let Ok(p) = serde_json::from_str::<scanner::Progress>(&txt) {
-                        emit_scan(&app2, ScanProgress { phase: p.phase.clone(), message: format!("Scanning as administrator: {}", p.current), entries: p.entries, dirs: p.dirs, bytes: p.bytes, current: p.current, elapsed_ms: p.elapsed_ms, done: false, ok: true });
+                        emit_scan(&app2, ScanProgress { phase: p.phase.clone(), message: format!("Scanning as administrator: {}", p.current), entries: p.entries, dirs: p.dirs, bytes: p.bytes, current: p.current, elapsed_ms: p.elapsed_ms, done: false, ok: true, top: p.top, junk: p.junk });
                     }
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -1601,7 +1607,7 @@ async fn run_scan_once(app: &AppHandle, state: &State<'_, ProcState>, root: Stri
                     continue;
                 }
                 if let Ok(p) = serde_json::from_value::<scanner::Progress>(v) {
-                    emit_scan(&app3, ScanProgress { phase: p.phase.clone(), message: match p.phase.as_str() { "aggregate" => "Adding up folder sizes…".into(), "write" => format!("Writing database{}", if p.current.is_empty() { String::new() } else { format!(": {}", p.current) }), _ => p.current.clone() }, entries: p.entries, dirs: p.dirs, bytes: p.bytes, current: p.current, elapsed_ms: p.elapsed_ms, done: false, ok: true });
+                    emit_scan(&app3, ScanProgress { phase: p.phase.clone(), message: match p.phase.as_str() { "aggregate" => "Adding up folder sizes…".into(), "write" => format!("Writing database{}", if p.current.is_empty() { String::new() } else { format!(": {}", p.current) }), _ => p.current.clone() }, entries: p.entries, dirs: p.dirs, bytes: p.bytes, current: p.current, elapsed_ms: p.elapsed_ms, done: false, ok: true, top: p.top, junk: p.junk });
                 }
             }
         }
@@ -1664,25 +1670,20 @@ async fn run_scan_once(app: &AppHandle, state: &State<'_, ProcState>, root: Stri
 
     scan_storage::activate_and_prune(&reports, &out_db)?;
 
-    // Derived reports (best effort, native).
-    emit_scan(&app, simple_progress("candidates", "Finding cleanup candidates…", false, true));
+    // Derived reports (best effort, native), side by side: Spotlight lookups dominate and wait on I/O.
+    emit_scan(&app, simple_progress("candidates", "Finding cleanup candidates and leftovers…", false, true));
     {
-        let db = out_db.clone();
-        let out = reports.join("candidates.json");
         let home = home_dir();
-        let _ = tauri::async_runtime::spawn_blocking(move || reports::write_candidates(&db, &out, &home, 80)).await;
-    }
-    emit_scan(&app, simple_progress("unused", "Checking for inactive large files…", false, true));
-    let _ = reports::write_unused(out_db.clone(), reports.join("unused-files.json"), 90, 100 * 1024 * 1024, 80).await;
-    emit_scan(&app, simple_progress("remnants", "Looking for leftovers of uninstalled apps…", false, true));
-    {
-        let db = out_db.clone();
-        let out = remnants::report_path(&reports);
-        let _ = tauri::async_runtime::spawn_blocking(move || remnants::write(Some(&db), &out, &home_dir())).await;
+        let (db1, out1, home1) = (out_db.clone(), reports.join("candidates.json"), home.clone());
+        let candidates = tauri::async_runtime::spawn_blocking(move || reports::write_candidates(&db1, &out1, &home1, 80));
+        let (db2, out2) = (out_db.clone(), remnants::report_path(&reports));
+        let leftovers = tauri::async_runtime::spawn_blocking(move || remnants::write(Some(&db2), &out2, &home));
+        let unused = reports::write_unused(out_db.clone(), reports.join("unused-files.json"), 90, 100 * 1024 * 1024, 80);
+        let _ = tokio::join!(candidates, leftovers, unused);
     }
 
     let meta = open_db().and_then(|c| scan_meta(&c)).ok_or("Scan finished but database could not be read")?;
-    emit_scan(&app, ScanProgress { phase: "done".into(), message: "Scan complete".into(), entries: meta.entries.unwrap_or(0), dirs: 0, bytes: 0, current: String::new(), elapsed_ms: 0, done: true, ok: true });
+    emit_scan(&app, ScanProgress { phase: "done".into(), message: "Scan complete".into(), entries: meta.entries.unwrap_or(0), dirs: 0, bytes: 0, current: String::new(), elapsed_ms: 0, done: true, ok: true, top: vec![], junk: vec![] });
     Ok(meta)
 }
 

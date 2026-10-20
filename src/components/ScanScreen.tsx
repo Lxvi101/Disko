@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { useScan } from '../hooks/useScan';
 import { api, errorText } from '../lib/api';
 import { formatBytes, formatNumber, relativeTime, formatDuration, shortPath } from '../lib/format';
-import type { ScanInfo } from '../types';
+import type { LiveJunk, ScanInfo } from '../types';
 
 type Target = 'home' | 'disk' | 'folder';
 
@@ -221,6 +221,24 @@ const LastScan: React.FC<{ s: ScanInfo; home: string; busy: boolean; onOpen: () 
   );
 };
 
+const JUNK_LABEL: Record<LiveJunk['kind'], string> = {
+  node_modules: 'node_modules',
+  build: 'Build folders',
+  python: 'Python envs',
+  caches: 'Caches',
+  trash: 'Trash',
+};
+
+const PHASE_LABEL: Record<string, string> = {
+  scan: 'Reading the disk',
+  aggregate: 'Adding up folder sizes',
+  write: 'Saving results',
+  candidates: 'Looking for cleanup candidates',
+  unused: 'Checking for inactive files',
+  remnants: 'Looking for leftovers',
+  done: 'Done',
+};
+
 const ProgressView: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
   const { scan, setScan, setStartScreen, info } = useStore();
   const [tick, setTick] = useState(0);
@@ -229,32 +247,77 @@ const ProgressView: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
     return () => clearInterval(id);
   }, []);
   const failed = scan?.done && !scan.ok;
-  const elapsed = scan?.elapsed_ms ? scan.elapsed_ms / 1000 : tick;
-  const rate = scan?.elapsed_ms && scan.entries ? Math.round(scan.entries / (scan.elapsed_ms / 1000)) : 0;
+  const elapsed = scan?.elapsed_ms ? Math.max(scan.elapsed_ms / 1000, tick) : tick;
   const phase = scan?.phase ?? 'scan';
-  const phaseLabel = phase === 'aggregate' ? 'Adding up folder sizes' : phase === 'write' ? 'Writing database' : phase === 'candidates' ? 'Finding cleanup candidates' : phase === 'unused' ? 'Checking for inactive files' : phase === 'done' ? 'Done' : 'Reading the filesystem';
+  const home = info?.home ?? '';
+  const top = scan?.top ?? [];
+  const junk = (scan?.junk ?? []).slice().sort((a, b) => b.bytes - a.bytes);
+  const max = top[0]?.bytes || 1;
+  const name = (p: string) => p.split('/').filter(Boolean).pop() ?? p;
 
   return (
-    <div className="h-full flex items-center justify-center">
-      <div className="w-[520px] px-8">
+    <div className="h-full overflow-y-auto">
+      <div className="max-w-[620px] mx-auto px-8 pt-14 pb-16">
         <div className="flex items-center gap-3">
           {!failed && (
             <motion.span className="w-4 h-4 rounded-full flex-shrink-0" style={{ border: '1.5px solid var(--line-2)', borderTopColor: 'var(--text)' }} animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.9, ease: 'linear' }} />
           )}
-          <h2 className="text-[16px] font-semibold">{failed ? 'Scan stopped' : phaseLabel}</h2>
+          <h2 className="text-[16px] font-semibold">{failed ? 'Scan stopped' : PHASE_LABEL[phase] ?? 'Scanning'}</h2>
+          <span className="flex-1" />
+          {!failed && <span className="tnum text-[12px]" style={{ color: 'var(--dim)' }}>{formatDuration(elapsed)}</span>}
         </div>
         <div className="mt-6 grid grid-cols-3 gap-4">
-          <Stat label="Entries" value={scan?.entries ? formatNumber(scan.entries) : '—'} />
           <Stat label="Measured" value={scan?.bytes ? formatBytes(scan.bytes) : '—'} />
-          <Stat label="Elapsed" value={formatDuration(elapsed)} sub={rate ? `${formatNumber(rate)} / s` : undefined} />
+          <Stat label="Items" value={scan?.entries ? formatNumber(scan.entries) : '—'} />
+          <Stat label="Folders" value={scan?.dirs ? formatNumber(scan.dirs) : '—'} />
         </div>
         <div className="mt-6 h-[3px] rounded-full overflow-hidden" style={{ background: 'var(--line)' }}>
           {!failed && <div className="h-full w-1/3 shimmer" />}
         </div>
         <div className="mt-3 mono text-[11px] truncate" style={{ color: failed ? 'var(--danger)' : 'var(--dim)' }}>
-          {failed ? scan?.message : scan?.current ? shortPath(scan.current, info?.home ?? '') : scan?.message}
+          {failed ? scan?.message : phase === 'scan' && scan?.current ? shortPath(scan.current, home) : scan?.message}
         </div>
-        <div className="mt-8 flex items-center gap-2">
+
+        {!failed && top.length > 0 && (
+          <section className="mt-9">
+            <div className="label">Biggest so far</div>
+            <div className="mt-3 space-y-1">
+              {top.map((f) => (
+                <motion.div key={f.path} layout transition={{ type: 'spring', stiffness: 500, damping: 45 }} className="live-row">
+                  <div className="flex items-baseline gap-3">
+                    <span className="text-[13px] font-medium truncate flex-1 min-w-0" title={f.path}>{shortPath(f.path, home)}</span>
+                    <span className="tnum text-[12.5px] flex-shrink-0">{formatBytes(f.bytes)}</span>
+                  </div>
+                  <div className="mt-1.5 h-[4px] rounded-full overflow-hidden" style={{ background: 'var(--line)' }}>
+                    <motion.div className="h-full rounded-full" style={{ background: 'var(--text)', opacity: 0.75 }} initial={false} animate={{ width: `${Math.max(1, (f.bytes / max) * 100)}%` }} transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }} />
+                  </div>
+                  {!!f.children?.length && (
+                    <div className="mt-1 text-[11.5px] truncate" style={{ color: 'var(--dim)' }}>
+                      {f.children.map((c) => `${name(c.path)} ${formatBytes(c.bytes)}`).join('  ·  ')}
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {!failed && junk.length > 0 && (
+          <section className="mt-8">
+            <div className="label">Rebuildable, spotted so far</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {junk.map((j) => (
+                <span key={j.kind} className="live-chip">
+                  <span>{JUNK_LABEL[j.kind] ?? j.kind}</span>
+                  <span className="tnum font-medium">{formatBytes(j.bytes)}</span>
+                  {(j.kind === 'node_modules' || j.kind === 'build') && j.count > 1 && <span className="tnum" style={{ color: 'var(--dim)' }}>{formatNumber(j.count)}×</span>}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <div className="mt-10 flex items-center gap-2">
           {failed ? (
             <button className="btn" onClick={() => { setScan(null); setStartScreen(true); }}>Back</button>
           ) : (

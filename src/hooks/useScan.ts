@@ -16,6 +16,9 @@ export function useScan() {
     let unlistenFallback: (() => void) | null = null;
     onScanFallback((reason) => useStore.getState().toast({ kind: 'info', title: 'Scanning without administrator rights', detail: `The administrator scan didn’t work: ${reason}` })).then((u) => (unlistenFallback = u));
     onScanProgress((p) => {
+      // Only the walk sends the live preview; later phases keep showing the last one.
+      const prev = useStore.getState().scan;
+      if (!p.done && !p.top?.length && prev?.top?.length) p = { ...p, top: prev.top, junk: prev.junk };
       useStore.getState().setScan(p);
       if (p.done && p.ok) {
         setTimeout(() => useStore.getState().setScan(null), 1500);

@@ -689,3 +689,11 @@ h1, h2, h3 { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', '
 .agent-menu-row[data-on='true'] { background: var(--bg-3); }
 .agent-effort { padding: 3px 9px; border-radius: 99px; font-size: 11px; color: var(--muted); border: 1px solid var(--line); }
 .agent-effort[data-on='true'] { color: var(--bg); background: var(--text); border-color: var(--text); }
+
+/* Live scan preview */
+.live-row { padding: 8px 0; }
+.live-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 10px; border-radius: 8px; font-size: 12px;
+  border: 1px solid var(--line-2); background: var(--bg-2);
+}

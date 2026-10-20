@@ -276,6 +276,22 @@ export interface ScanProgress {
   elapsed_ms: number;
   done: boolean;
   ok: boolean;
+  /** Live preview while the disk is walked: biggest folders so far, two levels deep. */
+  top?: LiveFolder[];
+  /** Live preview: rebuildable folders spotted so far. */
+  junk?: LiveJunk[];
+}
+
+export interface LiveFolder {
+  path: string;
+  bytes: number;
+  children?: LiveFolder[];
+}
+
+export interface LiveJunk {
+  kind: 'node_modules' | 'build' | 'python' | 'caches' | 'trash';
+  bytes: number;
+  count: number;
 }
 
 export interface CleanupProgress {
