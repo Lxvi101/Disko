@@ -159,7 +159,7 @@ export const ScanScreen: React.FC = () => {
           <AnimatePresence initial={false}>
             {target === 'disk' && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                <Check on={admin} onChange={setAdmin} label={<span className="inline-flex items-center gap-1.5"><Shield className="w-3.5 h-3.5" /> Scan as administrator</span>} hint="Also measures other users, system caches and swap. macOS will ask for your password. Cleanup stays limited to your home folder." />
+                <Check on={admin} onChange={setAdmin} label={<span className="inline-flex items-center gap-1.5"><Shield className="w-3.5 h-3.5" /> Scan as administrator</span>} hint="Also measures other users, system caches and swap. macOS will ask for your password. If the administrator scan can’t run, Disko scans without it instead. Cleanup stays limited to your home folder." />
               </motion.div>
             )}
           </AnimatePresence>

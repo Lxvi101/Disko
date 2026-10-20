@@ -122,7 +122,7 @@ export const CommandPalette: React.FC = () => {
                     { label: scanning ? 'Scan in progress…' : 'New scan…', run: () => setStartScreen(true), disabled: scanning },
                     { label: resolvedTheme === 'light' ? 'Switch to dark appearance' : 'Switch to light appearance', run: () => setTheme(resolvedTheme === 'light' ? 'dark' : 'light') },
                     { label: 'Follow system appearance', run: () => setTheme('system') },
-                    { label: 'Toggle advanced mode', run: () => setAdvanced(!useStore.getState().advanced) },
+                    { label: 'Toggle map details', run: () => setAdvanced(!useStore.getState().advanced) },
                   ].map((a) => (
                     <button key={a.label} disabled={a.disabled} className="w-full text-left px-3 py-2 rounded-lg row-hover text-[13px] disabled:opacity-40" onClick={() => { setPaletteOpen(false); a.run(); }}>
                       {a.label}

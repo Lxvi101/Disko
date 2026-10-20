@@ -26,6 +26,10 @@ import type {
   JunkItem,
   DupGroup,
   OldItem,
+  QuickReport,
+  QuickProgress,
+  QuickCleanOutcome,
+  QuickScanEvent,
 } from '../types';
 
 export const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -46,7 +50,8 @@ export const api = {
   unusedApps: () => invoke<UnusedItem[]>('get_unused_apps'),
   remnants: (force = false) => invoke<RemnantsReport>('get_remnants', { force }),
   models: () => invoke<CodexModels>('list_codex_models'),
-  chat: (args: { requestId: string; prompt: string; model: string; effort: string; context: ChatContext }) =>
+  /** `agent: true` gives Codex Disko's tools (scan, quarantine, restore). It can never delete. */
+  chat: (args: { requestId: string; prompt: string; model: string; effort: string; context: ChatContext; agent?: boolean }) =>
     invoke<CodexResult>('codex_chat', args),
   cancelChat: (requestId: string) => invoke<boolean>('codex_cancel', { requestId }),
   runScan: (root?: string, quick?: boolean, admin?: boolean) => invoke<ScanMeta>('run_scan', { root, quick, admin }),
@@ -71,6 +76,8 @@ export const api = {
   fullDiskAccess: () => invoke<boolean>('check_full_disk_access'),
   requestFullDiskAccess: () => invoke<boolean>('request_full_disk_access'),
   revealRunningApp: () => invoke<void>('reveal_running_app'),
+  quickScan: () => invoke<QuickReport>('quick_scan'),
+  quickClean: (ids: string[]) => invoke<QuickCleanOutcome>('quick_clean', { ids }),
   launchOptions: () => invoke<{ start_page?: string | null; start_path?: string | null; advanced?: boolean | null; autoscan?: string | null }>('get_launch_options'),
 };
 
@@ -86,6 +93,16 @@ export const onCleanupProgress = (cb: (p: CleanupProgress) => void): Promise<Unl
 /// Fires once when a scan written by an older rule set has been brought up to date in place.
 export const onScanReclassified = (cb: (rows: number) => void): Promise<UnlistenFn> =>
   listen<number>('scan-reclassified', (e) => cb(e.payload));
+
+export const onQuickScan = (cb: (e: QuickScanEvent) => void): Promise<UnlistenFn> =>
+  listen<QuickScanEvent>('quick-scan', (e) => cb(e.payload));
+
+export const onQuickProgress = (cb: (p: QuickProgress) => void): Promise<UnlistenFn> =>
+  listen<QuickProgress>('quick-progress', (e) => cb(e.payload));
+
+/// An administrator scan failed and Disko fell back to a regular scan; the payload is the reason.
+export const onScanFallback = (cb: (reason: string) => void): Promise<UnlistenFn> =>
+  listen<string>('scan-fallback', (e) => cb(e.payload));
 
 export function errorText(err: unknown): string {
   if (typeof err === 'string') return err;

@@ -12,8 +12,23 @@ pub struct XcodeItem {
 #[derive(Debug, Serialize)]
 pub struct Inventory { pub items: Vec<XcodeItem>, pub warnings: Vec<String> }
 
+/// `xcrun simctl` fails when only the Command Line Tools are selected. Point this one command at
+/// an installed Xcode instead of changing the global `xcode-select` choice.
+fn xcrun() -> Command {
+    let mut c = Command::new("/usr/bin/xcrun");
+    if std::env::var_os("DEVELOPER_DIR").is_none() {
+        let selected = Command::new("/usr/bin/xcode-select").arg("-p").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+        if !selected.contains(".app/") {
+            if let Some(dev) = ["/Applications/Xcode.app/Contents/Developer", "/Applications/Xcode-beta.app/Contents/Developer"].iter().find(|p| Path::new(p).is_dir()) {
+                c.env("DEVELOPER_DIR", dev);
+            }
+        }
+    }
+    c
+}
+
 pub fn simulator_devices(home: &Path) -> Result<Value, String> {
-    let out = Command::new("/usr/bin/xcrun").args(["simctl", "--set"])
+    let out = xcrun().args(["simctl", "--set"])
         .arg(home.join("Library/Developer/CoreSimulator/Devices"))
         .args(["list", "devices", "--json"]).output().map_err(|e| e.to_string())?;
     if !out.status.success() { return Err("Simulator status is unavailable. Open Xcode, check its selected command-line tools, then refresh. Device cleanup is disabled until status can be verified.".into()); }
@@ -47,7 +62,7 @@ pub fn check_simulator(path: &Path, home: &Path) -> Result<Option<String>, Strin
 }
 pub fn delete_simulator(id: &str, home: &Path) -> Result<(), String> {
     if !valid_uuid(id) { return Err("Invalid simulator identifier".into()); }
-    let out = Command::new("/usr/bin/xcrun").args(["simctl", "--set"])
+    let out = xcrun().args(["simctl", "--set"])
         .arg(home.join("Library/Developer/CoreSimulator/Devices"))
         .args(["delete", id]).output().map_err(|e| e.to_string())?;
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().into()) }
@@ -73,7 +88,7 @@ fn runtime_label(id: &str) -> String {
     let (platform, version) = raw.split_once('-').unwrap_or((raw, ""));
     format!("{} {}", platform, version.replace('-', ".")).trim().into()
 }
-fn support_version(name: &str) -> (String, Vec<u32>) {
+pub(crate) fn support_version(name: &str) -> (String, Vec<u32>) {
     let mut parts = name.split_whitespace();
     let first = parts.next().unwrap_or("");
     let (model, version) = if first.starts_with(|c: char| c.is_ascii_digit()) { ("Device", first) } else { (first, parts.next().unwrap_or("")) };

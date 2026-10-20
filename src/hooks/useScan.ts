@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { useStore } from '../store';
-import { api, errorText, onScanProgress, onScanReclassified } from '../lib/api';
+import { api, errorText, onScanFallback, onScanProgress, onScanReclassified } from '../lib/api';
 
 let listening = false;
 
@@ -13,6 +13,8 @@ export function useScan() {
     let owner = true;
     let unlisten: (() => void) | null = null;
     let unlistenRules: (() => void) | null = null;
+    let unlistenFallback: (() => void) | null = null;
+    onScanFallback((reason) => useStore.getState().toast({ kind: 'info', title: 'Scanning without administrator rights', detail: `The administrator scan didn’t work: ${reason}` })).then((u) => (unlistenFallback = u));
     onScanProgress((p) => {
       useStore.getState().setScan(p);
       if (p.done && p.ok) {
@@ -31,6 +33,7 @@ export function useScan() {
       owner = false;
       unlisten?.();
       unlistenRules?.();
+      unlistenFallback?.();
       listening = false;
     };
   }, []);
@@ -46,11 +49,12 @@ export function useScan() {
         // Hand the fresh scan to the agent for a supervised review.
         const st = useStore.getState();
         st.setStartScreen(false);
+        if (!['explore', 'junk', 'suggestions', 'timeline'].includes(st.page)) st.setPage('explore');
         st.refreshScans();
         if (st.advanced) st.setAssistantOpen(true);
         window.dispatchEvent(
           new CustomEvent('disko:ask', {
-            detail: `A fresh scan of ${meta.root} just finished (${meta.entries ?? 'unknown'} entries). Review it: read candidates.json and remnants.json from the reports folder and query the scan database for the largest folders, then explain in a few short paragraphs where the space went. Recommend a cleanup plan ranked by size and safety using the decision model: clearly disposable first, then leftovers of uninstalled apps, then items that need my confirmation with their recreate cost. Where a manager command is safer than moving a folder (Docker, Homebrew, pnpm, uv, simulators, model caches), give the command instead of a path. Put the exact paths in a disko-actions block.`,
+            detail: `A fresh scan of ${meta.root} just finished (${meta.entries ?? 'unknown'} entries). Review it: read candidates.json and remnants.json from the reports folder and query the scan database for the largest folders, then explain in a few short paragraphs where the space went. Recommend a cleanup plan ranked by size and safety using the decision model: clearly disposable first, then leftovers of uninstalled apps, then items that need my confirmation with their recreate cost. Where a manager command is safer than moving a folder (Docker, Homebrew, pnpm, uv, simulators, model caches), give the command instead of a path. Put the exact paths in a disko-actions block. This is a review only: do not quarantine anything unless I ask.`,
           }),
         );
       } catch (e) {

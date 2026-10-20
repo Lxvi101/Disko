@@ -202,10 +202,14 @@ export interface Suggestion {
 
 export interface ActivityItem {
   id: string;
-  type: 'command' | 'reasoning' | 'note' | 'error';
+  type: 'command' | 'reasoning' | 'note' | 'error' | 'tool';
   title: string;
   detail?: string;
   status?: 'running' | 'done' | 'failed';
+  /** For Disko tool calls: the tool name, its arguments and its parsed result. */
+  tool?: string;
+  args?: any;
+  result?: any;
 }
 
 export interface ChatMessage {
@@ -297,7 +301,7 @@ export interface ScanInfo {
   active: boolean;
 }
 
-export type Page = 'apps' | 'explore' | 'junk' | 'suggestions' | 'timeline' | 'quarantine';
+export type Page = 'quick' | 'apps' | 'explore' | 'junk' | 'suggestions' | 'timeline' | 'quarantine';
 export type VizMode = 'sunburst' | 'treemap' | 'list';
 
 export interface XcodeItem {
@@ -332,3 +336,25 @@ export interface OldItem {
   /** Generated folders inside a project, as [path, bytes]. */
   junk: [string, number][];
 }
+
+/** Quick Clean: live sweep of build leftovers and caches, grouped by the program that owns them. */
+export interface QuickItem {
+  id: string; path: string; label: string; detail: string; total: number; modified: number | null;
+  preselect: boolean; blocked: string | null;
+  /** False while the size is still being measured. */
+  measured?: boolean;
+}
+export interface QuickGroup {
+  id: string; program: string; title: string; blurb: string; after: string;
+  method: 'delete' | 'command' | string; command: string | null; total: number; items: QuickItem[];
+}
+export interface QuickReport { generated_at: number; groups: QuickGroup[]; notes: string[] }
+export interface QuickProgress { phase: 'discover' | 'clean' | 'done' | string; label: string; index: number; count: number; found_bytes: number; freed_bytes: number }
+export interface QuickCleanOutcome {
+  result: { freed_bytes: number; removed: string[]; commands: string[]; failures: { label: string; error: string }[] };
+  before: VolumeInfo; after: VolumeInfo;
+}
+export type QuickScanEvent =
+  | { kind: 'found'; groups: QuickGroup[] }
+  | { kind: 'sized'; sizes: [string, number][] }
+  | { kind: 'step'; label: string; done: number; count: number };

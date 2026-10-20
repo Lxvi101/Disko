@@ -11,6 +11,12 @@ fn main() {
     if args.iter().any(|a| a == "--classify") {
         std::process::exit(disko_lib::classify_cli(args));
     }
+    if args.iter().any(|a| a == "--mcp") {
+        std::process::exit(disko_lib::mcp_cli());
+    }
+    if args.iter().any(|a| a == "--quick-scan") {
+        std::process::exit(disko_lib::quick_scan_cli(args));
+    }
     if args.iter().any(|a| a == "--remnants") {
         std::process::exit(disko_lib::remnants_cli(args));
     }

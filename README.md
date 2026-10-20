@@ -16,13 +16,14 @@ Grab the latest `.dmg` from [Releases](https://github.com/Lxvi101/Disko/releases
 
 ## What it does
 
+- **Quick Clean:** one click, no disk scan. In a few seconds it finds build folders (Rust `target`, `node_modules`, `.build`, venvs), package caches (npm, pnpm, uv, pip, Homebrew), Xcode DerivedData and broken simulators, Docker build cache, old installers, logs and the Trash. Results are grouped by the program that made them, anything in use is skipped, and tool-managed stores are cleaned with the tool's own command
 - **Map:** scan your home folder (or the whole disk) and click through a sunburst of where the space went
-- **Junk:** every `node_modules`, Python venv, build folder, cache, log and old installer, one row each. Sort by size or by age, filter by kind, select a bunch and clean them in one go
+- **Junk:** everything rebuildable from your disk scan, grouped by program (Rust, Node.js, Python, Xcode…) instead of one endless list
 - **Suggestions:** the less obvious stuff. *AI picks* has Codex dig through your scan for forgotten projects, videos, toolchains and backups. *Duplicates* finds identical photos, videos, documents and installers (compared byte by byte, not just by name). *Leftovers* is what uninstalled apps left behind
 - **Timeline:** a chart of when you last actually used your apps, projects, big files, downloads, simulators, Node/Rust/Python versions and iPhone backups. Pick a cutoff like "a year" and see what's been sitting there. For old projects it only clears the dependencies and build output, never your code
 - **Apps:** laid out like the App Store, ranked by how much space each app is hiding. Xcode gets its own page for simulators, device support, DerivedData, archives and caches, broken down one by one. Also Adobe caches, old Cursor and Claude Code versions, browser caches and more
 - **Quarantine:** nothing gets deleted straight away. Stuff goes to quarantine first so you can restore it if something breaks. Empty it when you're sure.
-- **Assistant:** optional. If you have the [Codex CLI](https://github.com/openai/codex) installed, it can read your scan and explain what's worth removing. It's read-only and can't delete anything itself.
+- **Agent:** optional. If you have the [Codex CLI](https://github.com/openai/codex) installed, ask it to free up space and it does the work: it scans, explains, and moves the safe stuff into quarantine itself. It can't delete anything; emptying the quarantine is always your call. Pick any model your Codex offers, or leave it on your Codex default
 
 It's careful on purpose. Passwords, browser profiles, Photos, Mail, iCloud folders and system files are never offered for removal. Things with their own cleanup command (npm, pnpm, Homebrew, uv...) point you to that command instead of just deleting folders.
 

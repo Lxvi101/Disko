@@ -8,6 +8,8 @@ mod xcode;
 mod app_cleanup;
 mod findings;
 mod timeline;
+mod quick_clean;
+mod mcp;
 
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -149,6 +151,8 @@ pub struct CodexModel {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CodexModels {
+    /// The model Codex itself picks (from ~/.codex/config.toml or Codex's own default). Empty
+    /// when unknown; the UI then just says "Codex default".
     pub default_model: String,
     pub default_effort: String,
     pub models: Vec<CodexModel>,
@@ -925,75 +929,51 @@ fn config_default_model() -> (Option<String>, Option<String>) {
     (model, effort)
 }
 
+/// The model catalog straight from Codex (`codex debug models`), falling back to its on-disk
+/// cache. Nothing is baked in: whatever this Codex install offers is what the picker shows.
+fn codex_catalog() -> Option<serde_json::Value> {
+    if let Some(bin) = codex_bin() {
+        if let Ok(mut child) = std::process::Command::new(bin).args(["debug", "models"])
+            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
+        {
+            let start = std::time::Instant::now();
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) if start.elapsed() < std::time::Duration::from_secs(10) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                    _ => { let _ = child.kill(); break; }
+                }
+            }
+            let mut out = String::new();
+            if let Some(mut so) = child.stdout.take() { use std::io::Read; let _ = so.read_to_string(&mut out); }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&out) { return Some(v); }
+        }
+    }
+    serde_json::from_str(&fs::read_to_string(home_dir().join(".codex/models_cache.json")).ok()?).ok()
+}
+
 fn list_codex_models_sync() -> Result<CodexModels, String> {
     let (cfg_model, cfg_effort) = config_default_model();
     let mut models: Vec<CodexModel> = Vec::new();
-    if let Ok(content) = fs::read_to_string(home_dir().join(".codex/models_cache.json")) {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(arr) = json.get("models").and_then(|v| v.as_array()) {
-                for m in arr {
-                    let visibility = m.get("visibility").and_then(|v| v.as_str()).unwrap_or("list");
-                    if visibility != "list" {
-                        continue;
-                    }
-                    let slug = m.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    if slug.is_empty() {
-                        continue;
-                    }
-                    let efforts: Vec<String> = m
-                        .get("supported_reasoning_levels")
-                        .and_then(|v| v.as_array())
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|e| e.get("effort").and_then(|v| v.as_str()).map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_else(|| vec!["low".into(), "medium".into(), "high".into()]);
-                    models.push(CodexModel {
-                        display_name: m.get("display_name").and_then(|v| v.as_str()).unwrap_or(&slug).to_string(),
-                        description: m.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        default_effort: m.get("default_reasoning_level").and_then(|v| v.as_str()).unwrap_or("medium").to_string(),
-                        priority: m.get("priority").and_then(|v| v.as_i64()).unwrap_or(999),
-                        efforts,
-                        slug,
-                    });
-                }
-            }
-        }
+    let catalog = codex_catalog();
+    for m in catalog.as_ref().and_then(|j| j.get("models")).and_then(|v| v.as_array()).into_iter().flatten() {
+        if m.get("visibility").and_then(|v| v.as_str()).unwrap_or("list") != "list" { continue; }
+        let slug = m.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if slug.is_empty() { continue; }
+        let efforts: Vec<String> = m.get("supported_reasoning_levels").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|e| e.get("effort").and_then(|v| v.as_str()).map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        models.push(CodexModel {
+            display_name: m.get("display_name").and_then(|v| v.as_str()).unwrap_or(&slug).to_string(),
+            description: m.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            default_effort: m.get("default_reasoning_level").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            priority: m.get("priority").and_then(|v| v.as_i64()).unwrap_or(999),
+            efforts,
+            slug,
+        });
     }
     models.sort_by_key(|m| m.priority);
-    if models.is_empty() {
-        for (slug, name, desc) in [
-            ("gpt-6-astra", "GPT-6-Astra", "Most capable model for complex, demanding work."),
-            ("gpt-5.6-sol", "GPT-5.6-Sol", "Reliable agentic workhorse for everyday tasks."),
-            ("gpt-5.6-terra", "GPT-5.6-Terra", "Balanced agentic model for everyday work."),
-            ("gpt-5.5", "GPT-5.5", "Previous-generation model."),
-        ] {
-            models.push(CodexModel {
-                slug: slug.into(),
-                display_name: name.into(),
-                description: desc.into(),
-                efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
-                default_effort: "medium".into(),
-                priority: 0,
-            });
-        }
-    }
-    let default_model = cfg_model
-        .filter(|m| models.iter().any(|x| &x.slug == m))
-        .unwrap_or_else(|| models[0].slug.clone());
-    let default_effort = cfg_effort.unwrap_or_else(|| {
-        models
-            .iter()
-            .find(|m| m.slug == default_model)
-            .map(|m| m.default_effort.clone())
-            .unwrap_or_else(|| "medium".into())
-    });
-    Ok(CodexModels {
-        default_model,
-        default_effort,
-        models,
-    })
+    Ok(CodexModels { default_model: cfg_model.unwrap_or_default(), default_effort: cfg_effort.unwrap_or_default(), models })
 }
 
 fn fmt_bytes(b: u64) -> String {
@@ -1011,7 +991,7 @@ fn fmt_bytes(b: u64) -> String {
     }
 }
 
-fn build_prompt(prompt: &str, ctx: &ChatContext) -> String {
+fn build_prompt(prompt: &str, ctx: &ChatContext, agent: bool) -> String {
     let ws = workspace_dir();
     let home = home_dir();
     let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "disko".into());
@@ -1021,7 +1001,17 @@ fn build_prompt(prompt: &str, ctx: &ChatContext) -> String {
     s.push_str("You are Disko, the assistant inside a macOS disk-space visualizer and cleanup app. ");
     s.push_str("You help the user understand where their storage went and decide what is safe to remove. ");
     s.push_str("Be concise, concrete, and honest about uncertainty. Use short paragraphs and bullet lists; avoid headers unless the answer is long. ");
-    s.push_str("The user can choose recoverable quarantine or permanent deletion in the cleanup dialog. Quarantine does not reclaim space until purged. Never claim deletion or reclaimed space without a successful cleanup result.\n\n");
+    if !agent {
+        s.push_str("You cannot change anything on disk. Recommend items in the disko-actions block; the user moves them to quarantine in Disko. Never claim deletion or reclaimed space.\n\n");
+    } else {
+    s.push_str("You are an agent: when the user asks you to clean up or free space, do the work yourself instead of handing them a to-do list.\n\n");
+    s.push_str("# Your hands: the `disko` tools\n");
+    s.push_str("- `quick_scan` runs Disko's Quick Clean sweep in a few seconds and returns build folders, dependencies, caches, Xcode data, Docker, Trash, logs and installers grouped by program, with `preselect` (safe and idle) and `blocked` (in use). Start here when asked to free space.\n");
+    s.push_str("- `quarantine` moves paths into Disko's quarantine. It is reversible. Use it directly, without asking first, for clearly disposable items (decision tier 1 below, or quick_scan items with `preselect: true`). For tier 2 ask or list them as suggestions; never quarantine tier 3 or 4 without the user explicitly naming them. Never quarantine anything `blocked`.\n");
+    s.push_str("- `quarantine_list` and `quarantine_restore` show and undo earlier batches. `disk_status` reports free space.\n");
+    s.push_str("- You cannot delete anything, and must not try to (your shell is read-only). Quarantine does not free space by itself: the user empties the quarantine in Disko when they are happy. Always say how much you moved and remind them of that. Never claim space was freed.\n");
+    s.push_str("- Tool-managed stores (Docker, Homebrew, pnpm, uv) are cleaned by their own commands, which you cannot run. Recommend the command in the disko-actions block instead.\n\n");
+    }
 
     s.push_str("# Tools available to you\n");
     let db = db_path();
@@ -1033,7 +1023,7 @@ fn build_prompt(prompt: &str, ctx: &ChatContext) -> String {
         })
         .unwrap_or_default();
     s.push_str(&format!(
-        "You run in a read-only sandbox with the working directory `{}`. You may run shell commands to inspect the filesystem (ls, du -sh, find, stat, mdls) and read-only manager inventories (see below).\n",
+        "Your shell runs in a read-only sandbox with the working directory `{}`. You may run shell commands to inspect the filesystem (ls, du -sh, find, stat, mdls) and read-only manager inventories (see below).\n",
         ws.display()
     ));
     s.push_str(&format!(
@@ -1069,7 +1059,7 @@ fn build_prompt(prompt: &str, ctx: &ChatContext) -> String {
     s.push_str("Rules of thumb: prefer the manager's command over moving its store (docker system prune, brew cleanup, pnpm store prune, uv cache prune, go clean -modcache, conda clean --all, rustup toolchain uninstall, nvm uninstall, ollama rm, hf cache delete, xcrun simctl delete unavailable). Age alone never proves abandonment; kMDItemLastUsedDate only updates on Launch Services opens, so treat it as one vote. Never call a browser profile, Maven .m2, Docker volume, Xcode archive, or JetBrains cache root (it holds Local History) rebuildable. Mention rebuild time or download size when it matters, and quote sizes from the scan rather than guessing.\n\n");
 
     s.push_str("# Response format\n");
-    s.push_str("Write the answer in Markdown. When you recommend specific items, finish with a fenced block tagged `disko-actions` containing JSON like:\n");
+    s.push_str("Write the answer in Markdown and keep it short: what you did, what it moved, what is left for the user to decide. When there are items you did not quarantine but recommend (they need the user's OK, or need a manager command), finish with a fenced block tagged `disko-actions` containing JSON like:\n");
     s.push_str("```disko-actions\n{\"suggestions\":[{\"path\":\"/absolute/path\",\"bytes\":123456,\"reason\":\"why it is safe\",\"confidence\":\"high\",\"action\":\"quarantine\"},{\"path\":\"/Users/x/.cache/uv\",\"bytes\":1200000,\"reason\":\"uv tracks what is still referenced\",\"confidence\":\"high\",\"action\":\"command\",\"command\":\"uv cache prune\"}]}\n```\n");
     s.push_str("Only include absolute paths you verified exist. `action` is `quarantine` (the app can collect it) or `command` (show the manager command instead; the app will not move that path). Use confidence high/medium/low. Omit the block when you have nothing to recommend.\n\n");
 
@@ -1124,9 +1114,11 @@ async fn codex_chat(
     model: Option<String>,
     effort: Option<String>,
     context: ChatContext,
+    agent: Option<bool>,
 ) -> Result<CodexResult, String> {
+    let agent = agent.unwrap_or(false);
     let bin = codex_bin().ok_or("Codex CLI not found. Install it from https://chatgpt.com/codex or run `codex update`.")?;
-    let full_prompt = build_prompt(&prompt, &context);
+    let full_prompt = build_prompt(&prompt, &context, agent);
     let ws = workspace_dir();
 
     let mut cmd = Command::new(&bin);
@@ -1140,6 +1132,16 @@ async fn codex_chat(
         .arg("never")
         .arg("-C")
         .arg(&ws);
+    // Disko's own tools (see mcp.rs): Codex's shell stays read-only, but through these it can run
+    // Quick Clean and move things into quarantine. There is no tool that deletes.
+    if let Some(exe) = std::env::current_exe().ok().filter(|_| agent) {
+        let toml_str = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+        cmd.arg("-c").arg(format!("mcp_servers.disko.command={}", toml_str(&exe.to_string_lossy())))
+            .arg("-c").arg("mcp_servers.disko.args=[\"--mcp\"]")
+            .arg("-c").arg(format!("mcp_servers.disko.env={{DISKO_WORKSPACE={}, HOME={}}}", toml_str(&ws.to_string_lossy()), toml_str(&home_dir().to_string_lossy())))
+            .arg("-c").arg("mcp_servers.disko.tool_timeout_sec=300")
+            .arg("-c").arg("mcp_servers.disko.startup_timeout_sec=20");
+    }
     if let Some(m) = model.as_ref().filter(|m| !m.is_empty()) {
         cmd.arg("-m").arg(m);
     }
@@ -1388,6 +1390,24 @@ pub fn reports_cli(args: Vec<String>) -> i32 {
     0
 }
 
+/// `disko --mcp`: the assistant's tool server, spawned by Codex.
+pub fn mcp_cli() -> i32 { mcp::serve() }
+
+/// Headless, read-only: `disko --quick-scan` prints what Quick Clean would offer as JSON.
+pub fn quick_scan_cli(_args: Vec<String>) -> i32 {
+    let started = std::time::Instant::now();
+    let report = quick_clean::discover(&home_dir(), &mut |e| {
+        if let quick_clean::QuickEvent::Found { groups } = &e {
+            for g in groups { eprintln!("{:>6} ms  found {} / {} ({} items)", started.elapsed().as_millis(), g.program, g.title, g.items.len()); }
+        }
+    });
+    eprintln!("{:>6} ms  done", started.elapsed().as_millis());
+    match report {
+        Ok(r) => { println!("{}", serde_json::to_string_pretty(&r).unwrap_or_default()); 0 }
+        Err(e) => { eprintln!("{}", e); 1 }
+    }
+}
+
 /// Headless entry point: `disko --scan ROOT --output DB [--quick] [--exclude P]... [--progress-file F] [--cancel-file F]`.
 /// Prints JSON progress lines to stdout. Used for normal scans (child process) and admin scans (via osascript).
 pub fn scan_cli(args: Vec<String>) -> i32 {
@@ -1463,16 +1483,32 @@ async fn run_scan(app: AppHandle, state: State<'_, ProcState>, root: Option<Stri
     if state.scan.lock().await.is_some() {
         return Err("A scan is already running".into());
     }
-    let ws = workspace_dir();
-    let reports = reports_dir();
     let root = root.unwrap_or_else(|| home_dir().to_string_lossy().to_string());
     let quick = quick.unwrap_or(false);
     let admin = admin.unwrap_or(false);
+    match run_scan_once(&app, &state, root.clone(), quick, admin).await {
+        // An administrator scan that fails for any reason other than the user saying no or
+        // pressing cancel falls back to a regular scan, so the user still gets a result.
+        Err(e) if admin && e != "Scan cancelled" && e != "Administrator approval was cancelled" => {
+            emit_scan(&app, simple_progress("scan", &format!("Administrator scan failed ({}). Scanning without administrator rights…", e), false, true));
+            let _ = app.emit("scan-fallback", e.clone());
+            run_scan_once(&app, &state, root, quick, false).await
+        }
+        other => other,
+    }
+}
+
+async fn run_scan_once(app: &AppHandle, state: &State<'_, ProcState>, root: String, quick: bool, admin: bool) -> Result<ScanMeta, String> {
+    let app = app.clone();
+    let ws = workspace_dir();
+    let reports = reports_dir();
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let out_db = reports.join(format!("{}-{}-{}.sqlite", slug(&root), if quick { "quick" } else { "full" }, stamp));
     let _pending = scan_storage::PendingScan::new(out_db.clone());
     let progress_file = reports.join(format!(".progress-{}.json", stamp));
     let cancel_file = reports.join(format!(".cancel-{}", stamp));
+    let admin_log = reports.join(format!(".admin-{}.log", stamp));
+    let admin_status = reports.join(format!(".admin-{}.status", stamp));
     let _ = fs::remove_file(&cancel_file);
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
 
@@ -1495,13 +1531,16 @@ async fn run_scan(app: AppHandle, state: State<'_, ProcState>, root: Option<Stri
         let sh_quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
         let uid = unsafe { libc::getuid() };
         let gid = unsafe { libc::getgid() };
+        // osascript only returns output once the command ends and mangles line endings, so the
+        // scanner reports through files instead: progress, stderr and its exit status.
         let cmd = format!(
-            "{} {} ; chown {}:{} {} 2>/dev/null; true",
-            sh_quote(&exe.to_string_lossy()),
-            args.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" "),
-            uid,
-            gid,
-            sh_quote(&out_db.to_string_lossy())
+            "{exe} {args} >/dev/null 2>{log}; echo $? >{status}; chown {uid}:{gid} {db} {log} {status} {progress} 2>/dev/null; true",
+            exe = sh_quote(&exe.to_string_lossy()),
+            args = args.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" "),
+            log = sh_quote(&admin_log.to_string_lossy()),
+            status = sh_quote(&admin_status.to_string_lossy()),
+            db = sh_quote(&out_db.to_string_lossy()),
+            progress = sh_quote(&progress_file.to_string_lossy()),
         );
         let script = format!("do shell script \"{}\" with administrator privileges", cmd.replace('\\', "\\\\").replace('"', "\\\""));
         Command::new("/usr/bin/osascript")
@@ -1586,8 +1625,20 @@ async fn run_scan(app: AppHandle, state: State<'_, ProcState>, root: Option<Stri
         let _ = t.await;
     }
     let last = stdout_task.await.unwrap_or(None);
-    let stderr_text = stderr_task.await.unwrap_or_default();
+    let mut stderr_text = stderr_task.await.unwrap_or_default();
     *state.scan.lock().await = None;
+    if admin {
+        let code = fs::read_to_string(&admin_status).ok().and_then(|s| s.trim().parse::<i32>().ok());
+        let log = fs::read_to_string(&admin_log).unwrap_or_default();
+        let _ = fs::remove_file(&admin_status);
+        let _ = fs::remove_file(&admin_log);
+        if !log.trim().is_empty() { stderr_text = format!("{}\n{}", stderr_text.trim(), log.trim()); }
+        match code {
+            Some(0) | None => {}
+            Some(137) | Some(9) => stderr_text.push_str("\nThe scanner was stopped by macOS, most likely because it ran out of memory. Try a quick scan."),
+            Some(c) => stderr_text.push_str(&format!("\nThe scanner exited with code {}.", c)),
+        }
+    }
     let _ = fs::remove_file(&progress_file);
     let cancelled = cancel_file.exists();
     let _ = fs::remove_file(&cancel_file);
@@ -1603,7 +1654,7 @@ async fn run_scan(app: AppHandle, state: State<'_, ProcState>, root: Option<Stri
         } else if stderr_text.contains("User canceled") || stderr_text.contains("-128") {
             "Administrator approval was cancelled".to_string()
         } else if !stderr_text.trim().is_empty() {
-            stderr_text.trim().chars().take(400).collect()
+{ let t: Vec<char> = stderr_text.trim().chars().collect(); t[t.len().saturating_sub(400)..].iter().collect() }
         } else {
             "Scan failed".to_string()
         };
@@ -2504,6 +2555,30 @@ async fn get_coverage_issue_count() -> Result<u64, String> {
         .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn quick_scan(app: AppHandle) -> Result<quick_clean::QuickReport, String> {
+    tauri::async_runtime::spawn_blocking(move || quick_clean::discover(&home_dir(), &mut |e| { let _ = app.emit("quick-scan", e); }))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+struct QuickCleanOutcome { result: quick_clean::QuickResult, before: VolumeInfo, after: VolumeInfo }
+
+#[tauri::command]
+async fn quick_clean(app: AppHandle, ids: Vec<String>) -> Result<QuickCleanOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = CLEANUP_LOCK.lock().map_err(|_| "Cleanup lock unavailable".to_string())?;
+        let home = home_dir();
+        let before = volume_info(&home);
+        let result = quick_clean::clean(&home, &ids, &mut |p| { let _ = app.emit("quick-progress", p); })?;
+        let _ = detach_scan_entries(&result.removed);
+        // APFS hands space back asynchronously; give it a moment before measuring.
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        let after = volume_info(&home);
+        Ok(QuickCleanOutcome { result, before, after })
+    }).await.map_err(|e| e.to_string())?
+}
+
 // ---------------------------------------------------------------------------
 
 pub fn run() {
@@ -2558,6 +2633,8 @@ pub fn run() {
             check_full_disk_access,
             request_full_disk_access,
             reveal_running_app,
+            quick_scan,
+            quick_clean,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Disko");

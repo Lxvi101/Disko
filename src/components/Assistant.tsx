@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowUp, Square, X, ChevronRight, Plus, Check, Trash2 } from 'lucide-react';
+import { ArrowUp, Square, X, ChevronRight, ChevronDown, Plus, Check, Trash2, Undo2, Sparkles, ScanSearch, PackageOpen, HardDrive, Brain, ShieldCheck } from 'lucide-react';
 import { useStore } from '../store';
 import { api, errorText, onCodexEvent } from '../lib/api';
 import { formatBytes, shortPath, uid } from '../lib/format';
@@ -35,17 +35,34 @@ function summarizeCommand(cmd: string): string {
   return cmd.replace(/^\/bin\/z?sh -lc\s+/, '').replace(/^'(.*)'$/s, '$1').replace(/^"(.*)"$/s, '$1').slice(0, 160);
 }
 
+/** MCP results arrive as text content holding JSON. */
+function parseToolResult(item: any): any {
+  const sc = item?.result?.structured_content ?? item?.result?.structuredContent;
+  if (sc) return sc;
+  const text = item?.result?.content?.find?.((c: any) => c?.type === 'text')?.text;
+  try { return text ? JSON.parse(text) : null; } catch { return text ?? null; }
+}
+
+const TOOL_LABEL: Record<string, { running: string; done: (r: any, a: any) => string }> = {
+  quick_scan: { running: 'Sweeping for junk…', done: (r) => `Ran Quick Clean · ${r?.groups?.length ?? 0} groups found` },
+  quarantine: { running: 'Moving things to quarantine…', done: (r) => r?.moved?.length ? `Quarantined ${r.moved.length} ${r.moved.length === 1 ? 'item' : 'items'} · ${r.size}` : 'Nothing was moved' },
+  quarantine_list: { running: 'Checking the quarantine…', done: (r) => `Looked at the quarantine · ${r?.batches?.length ?? 0} batches` },
+  quarantine_restore: { running: 'Restoring…', done: (r) => `Restored ${r?.restored_items ?? 0} items` },
+  disk_status: { running: 'Checking free space…', done: (r) => `Checked disk · ${r?.free ?? '?'} free` },
+};
+
 export const Assistant: React.FC = () => {
-  const { messages, generating, model, effort, models, setModel, setEffort, setAssistantOpen, currentPath, currentItems, staged, page, info, clearChat, toast, stageMany, isStaged, toggleStage, advanced } = useStore();
+  const { messages, generating, setAssistantOpen, currentPath, staged, info, clearChat, toast, stageMany, isStaged, toggleStage } = useStore();
   const [input, setInput] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const activeReq = useRef<string | null>(null);
-  const [showModels, setShowModels] = useState(false);
-  const currentModel = useMemo(() => models?.models.find((m) => m.slug === model), [models, model]);
 
   useEffect(() => {
+    // Unlisten even if the effect is torn down before `listen` resolves (React remounts in dev).
+    let live = true;
     let un: (() => void) | null = null;
     onCodexEvent((p) => {
+      if (!live) return;
       const st = useStore.getState();
       if (!st.messages.some((m) => m.id === p.request_id)) return;
       const ev = p.event;
@@ -54,18 +71,23 @@ export const Assistant: React.FC = () => {
       const item = ev.item ?? {};
       const itemType: string = item.type;
       const id = String(item.id ?? uid());
+      const done = type === 'item.completed';
       st.updateMessage(p.request_id, (m) => {
         const activity = [...(m.activity ?? [])];
         const idx = activity.findIndex((a) => a.id === id);
         let entry: ActivityItem | null = null;
         if (itemType === 'command_execution') {
-          const done = type === 'item.completed';
           entry = { id, type: 'command', title: summarizeCommand(String(item.command ?? '')), detail: String(item.aggregated_output ?? '').slice(0, 4000), status: done ? (item.exit_code === 0 || item.exit_code == null ? 'done' : 'failed') : 'running' };
+        } else if (itemType === 'mcp_tool_call') {
+          const result = done ? parseToolResult(item) : null;
+          const failed = done && (item.status === 'failed' || !!item.error || item.result?.is_error || item.result?.isError);
+          const label = TOOL_LABEL[item.tool] ?? { running: `Running ${item.tool}…`, done: () => `Ran ${item.tool}` };
+          entry = { id, type: 'tool', tool: String(item.tool), args: item.arguments, result, title: failed ? `${item.tool} failed: ${typeof result === 'string' ? result : item.error?.message ?? ''}` : done ? label.done(result, item.arguments) : label.running, status: failed ? 'failed' : done ? 'done' : 'running' };
         } else if (itemType === 'reasoning') {
           entry = { id, type: 'reasoning', title: String(item.text ?? item.summary ?? 'Thinking').slice(0, 400), status: 'done' };
         } else if (itemType === 'error') {
           entry = { id, type: 'error', title: String(item.message ?? 'Error'), status: 'failed' };
-        } else if (itemType === 'agent_message' && type === 'item.completed') {
+        } else if (itemType === 'agent_message' && done) {
           const text = String(item.text ?? '');
           return { text: m.text ? `${m.text}\n\n${text}` : text };
         }
@@ -74,8 +96,14 @@ export const Assistant: React.FC = () => {
         else activity.push(entry);
         return { activity };
       });
-    }).then((u) => (un = u));
-    return () => un?.();
+      // The agent moved things: bring every view up to date and tell the user.
+      if (done && itemType === 'mcp_tool_call' && (item.tool === 'quarantine' || item.tool === 'quarantine_restore')) {
+        const r = parseToolResult(item);
+        st.refreshJournals(); st.reloadData(); st.refreshCurrent();
+        if (item.tool === 'quarantine' && r?.moved?.length) st.toast({ kind: 'success', title: `Disko quarantined ${r.moved.length} ${r.moved.length === 1 ? 'item' : 'items'}`, detail: `${r.size} · empty the quarantine to free the space` });
+      }
+    }).then((u) => { if (live) un = u; else u(); });
+    return () => { live = false; un?.(); };
   }, []);
 
   const send = useCallback(async (text: string) => {
@@ -94,6 +122,7 @@ export const Assistant: React.FC = () => {
         prompt: text.trim(),
         model: st.model,
         effort: st.effort,
+        agent: true,
         context: {
           page: st.page,
           current_path: st.currentPath,
@@ -131,17 +160,18 @@ export const Assistant: React.FC = () => {
     if (activeReq.current) await api.cancelChat(activeReq.current).catch(() => {});
   };
 
-  const quick = useMemo(() => {
-    const st = useStore.getState();
-    const folder = !currentPath || currentPath === st.rootPath ? 'my home folder' : currentPath.split('/').filter(Boolean).pop() ?? 'this folder';
+  const starters = useMemo(() => {
+    const folder = currentPath ? currentPath.split('/').filter(Boolean).pop() : null;
     const base = [
-      { label: 'What can I safely free up?', q: 'What can I safely free up right now? Rank by size and safety, and list exact paths in a disko-actions block.' },
-      { label: `What is in ${folder}?`, q: `Explain what is taking up space in ${currentPath} and which parts are safe to remove.` },
-      { label: 'Developer leftovers', q: 'Find leftover developer caches, old node_modules, virtualenvs, simulators and build outputs I am probably not using anymore.' },
+      { icon: Sparkles, label: 'Free up space for me', sub: 'Scans, then quarantines the safe stuff', q: 'Free up space for me. Run a quick scan, quarantine everything that is clearly safe and idle, and tell me what you moved and what you left for me to decide.' },
+      { icon: HardDrive, label: 'Where did my space go?', sub: 'A short tour of the biggest things', q: 'Where did my disk space go? Give me a short tour of the biggest things and which of them are safe to clean.' },
+      { icon: ScanSearch, label: 'Clean my developer junk', sub: 'Builds, node_modules, caches, simulators', q: 'Clean up my developer junk: old build folders, node_modules, virtualenvs, package caches and Xcode leftovers I have not touched in a while. Quarantine what is clearly safe.' },
+      { icon: PackageOpen, label: 'What’s in quarantine?', sub: 'And is it safe to empty?', q: 'What is in my quarantine right now, and is any of it risky to empty?' },
     ];
-    if (staged.length) base.unshift({ label: `Review the ${staged.length} collected`, q: 'Review the items I collected for cleanup. Flag anything risky and say what each one costs to recreate.' });
-    return base;
-  }, [currentPath, staged.length]);
+    if (folder && currentPath !== info?.home) base.splice(2, 0, { icon: ScanSearch, label: `What’s in ${folder}?`, sub: 'Explain this folder', q: `Explain what is taking up space in ${currentPath} and which parts are safe to remove.` });
+    if (staged.length) base.unshift({ icon: ShieldCheck, label: `Review my ${staged.length} picks`, sub: 'Flags anything risky', q: 'Review the items I collected for cleanup. Flag anything risky and say what each one costs to recreate.' });
+    return base.slice(0, 4);
+  }, [currentPath, staged.length, info?.home]);
 
   const stageSuggestions = (all: Suggestion[]) => {
     const s = all.filter((x) => x.action !== 'command');
@@ -151,126 +181,218 @@ export const Assistant: React.FC = () => {
   };
 
   return (
-    <aside className="h-full flex flex-col" style={{ borderLeft: '1px solid var(--line)' }}>
-      <div className="h-[52px] flex items-center px-4 flex-shrink-0 drag-region">
-        <span className="text-[13px] font-semibold">Disko</span>
-        {advanced && (
-          <button className="no-drag ml-2 text-[11.5px] hover:text-white transition-colors" style={{ color: 'var(--muted)' }} onClick={() => setShowModels(!showModels)}>
-            {currentModel?.display_name ?? model ?? 'default'} · {effort || 'default'}
-          </button>
-        )}
+    <aside className="agent h-full flex flex-col">
+      <div className="h-[52px] flex items-center gap-2 px-4 flex-shrink-0 drag-region">
+        <span className="text-[13px] font-semibold">Agent</span>
         <span className="flex-1" />
         {messages.length > 0 && (
-          <button className="no-drag btn btn-ghost btn-icon" title="Clear" onClick={clearChat} disabled={!!generating}><Trash2 className="w-3.5 h-3.5" /></button>
+          <button className="no-drag btn btn-ghost btn-icon" title="New chat" onClick={clearChat} disabled={!!generating}><Trash2 className="w-3.5 h-3.5" /></button>
         )}
-        <button className="no-drag btn btn-ghost btn-icon" onClick={() => setAssistantOpen(false)} title="Hide"><X className="w-4 h-4" /></button>
+        <button className="no-drag btn btn-ghost btn-icon" onClick={() => setAssistantOpen(false)} title="Hide (⌘J)"><X className="w-4 h-4" /></button>
       </div>
 
-      <AnimatePresence>
-        {showModels && advanced && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden flex-shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
-            <div className="px-3 pb-3">
-              <div className="label px-1 py-1.5">Model</div>
-              {(models?.models ?? []).map((m) => (
-                <button key={m.slug} onClick={() => setModel(m.slug)} className="w-full text-left px-2 py-1.5 rounded-md row-hover flex items-center gap-2" style={{ background: m.slug === model ? 'var(--bg-3)' : undefined }}>
-                  <span className="text-[12.5px]">{m.display_name}</span>
-                  <span className="text-[11px] truncate flex-1" style={{ color: 'var(--dim)' }}>{m.description}</span>
-                  {m.slug === models?.default_model && <span className="chip">default</span>}
-                </button>
-              ))}
-              <div className="label px-1 py-1.5 mt-1">Reasoning</div>
-              <div className="flex flex-wrap gap-1 px-1">
-                {(currentModel?.efforts ?? ['low', 'medium', 'high']).map((e) => (
-                  <button key={e} onClick={() => setEffort(e)} className="chip" style={{ color: effort === e ? 'var(--text)' : 'var(--muted)', background: effort === e ? 'var(--bg-3)' : undefined }}>{e}</button>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-2">
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto px-4 pb-2">
         {messages.length === 0 && (
-          <div className="pt-4">
-            <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-              Ask about anything on your disk. Disko runs Codex in a read-only sandbox with your scan, so it can look inside folders and hand you a plan you can collect in one click.
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="pt-6">
+            <h2 className="text-[19px] font-semibold">What should I tidy up?</h2>
+            <p className="text-[12.5px] leading-relaxed mt-1.5" style={{ color: 'var(--muted)' }}>
+              I can scan your Mac, explain what’s using space and move the safe stuff into quarantine myself. I never delete anything: you empty the quarantine when you’re happy.
             </p>
-            <div className="flex flex-col items-start gap-1 mt-4">
-              {quick.map((q) => (
-                <button key={q.label} className="text-left text-[12.5px] px-2 py-1 -mx-2 rounded-md row-hover" onClick={() => send(q.q)}>{q.label}</button>
+            <div className="grid gap-2 mt-5">
+              {starters.map((q, i) => (
+                <motion.button key={q.label} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 * i }} className="agent-starter" onClick={() => send(q.q)} disabled={!info?.codex_path}>
+                  <span className="agent-starter-icon"><q.icon className="w-4 h-4" /></span>
+                  <span className="flex-1 min-w-0 text-left">
+                    <span className="block text-[13px] font-semibold">{q.label}</span>
+                    <span className="block text-[11.5px]" style={{ color: 'var(--dim)' }}>{q.sub}</span>
+                  </span>
+                  <ChevronRight className="w-4 h-4" style={{ color: 'var(--dim)' }} />
+                </motion.button>
               ))}
             </div>
-          </div>
+            {!info?.codex_path && <p className="text-[12px] mt-4" style={{ color: 'var(--warn)' }}>The agent runs on the Codex CLI, which isn’t installed. Get it from chatgpt.com/codex.</p>}
+          </motion.div>
         )}
         {messages.map((m) => (
           <Message key={m.id} m={m} home={info?.home ?? ''} isStaged={isStaged} onToggle={(s) => toggleStage({ path: s.path, name: s.path.split('/').pop() ?? s.path, kind: 'directory', total: s.bytes ?? 0, category: 'review', reason: s.reason, source: 'assistant' })} onStageAll={stageSuggestions} />
         ))}
       </div>
 
-      {messages.length > 0 && !generating && (
-        <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
-          {quick.slice(0, 3).map((q) => (
-            <button key={q.label} className="btn btn-sm" onClick={() => send(q.q)}>{q.label}</button>
-          ))}
-        </div>
-      )}
-
       <div className="p-3 flex-shrink-0">
-        <div className="flex items-end gap-2 rounded-xl px-3 py-2" style={{ background: 'var(--bg-2)', border: '1px solid var(--line)' }}>
+        <div className="agent-composer">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
-            rows={Math.min(5, Math.max(1, input.split('\n').length))}
-            placeholder={info?.codex_path ? 'Ask Disko…' : 'Codex CLI not found'}
+            rows={Math.min(6, Math.max(2, input.split('\n').length))}
+            placeholder={info?.codex_path ? 'Ask or tell Disko what to clean…' : 'Codex CLI not found'}
             disabled={!info?.codex_path}
-            className="flex-1 bg-transparent outline-none resize-none text-[13px] py-0.5 selectable"
+            className="w-full bg-transparent outline-none resize-none text-[13px] selectable"
             style={{ color: 'var(--text)' }}
           />
-          {generating ? (
-            <button className="btn btn-icon !p-1.5" onClick={stop} title="Stop"><Square className="w-3 h-3 fill-current" /></button>
-          ) : (
-            <button className="btn btn-primary btn-icon !p-1.5" onClick={() => send(input)} disabled={!input.trim() || !info?.codex_path} title="Send"><ArrowUp className="w-3.5 h-3.5" /></button>
-          )}
+          <div className="flex items-center gap-2 mt-1">
+            <ModelPicker />
+            <span className="flex-1" />
+            {generating ? (
+              <button className="agent-send" onClick={stop} title="Stop"><Square className="w-3 h-3 fill-current" /></button>
+            ) : (
+              <button className="agent-send" onClick={() => send(input)} disabled={!input.trim() || !info?.codex_path} title="Send (↵)"><ArrowUp className="w-4 h-4" strokeWidth={2.5} /></button>
+            )}
+          </div>
         </div>
-        <div className="flex justify-between px-1 mt-1.5 text-[10.5px]" style={{ color: 'var(--dim)' }}>
-          <span>{page === 'explore' ? shortPath(currentPath, info?.home ?? '') || '~' : page}{staged.length ? ` · ${staged.length} collected` : ''}</span>
-          <span>{info?.codex_version ? 'read-only' : ''}</span>
-        </div>
+        <p className="text-[10.5px] mt-1.5 px-1 flex items-center gap-1" style={{ color: 'var(--dim)' }}>
+          <ShieldCheck className="w-3 h-3" /> Can quarantine and restore. Can’t delete.
+        </p>
       </div>
     </aside>
   );
 };
 
+/** Model and reasoning effort, straight from Codex's own catalog. "Codex default" passes nothing. */
+function ModelPicker() {
+  const { models, model, effort, setModel, setEffort } = useStore();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener('mousedown', h);
+    return () => window.removeEventListener('mousedown', h);
+  }, [open]);
+  const list = models?.models ?? [];
+  const chosen = list.find((m) => m.slug === model);
+  const codexDefault = list.find((m) => m.slug === models?.default_model);
+  const efforts = (chosen ?? codexDefault)?.efforts ?? [];
+  const label = chosen ? chosen.display_name : 'Codex default';
+  return (
+    <div className="relative" ref={ref}>
+      <button className="agent-model" onClick={() => setOpen(!open)} title="Model">
+        <Brain className="w-3.5 h-3.5" />
+        <span className="truncate max-w-[150px]">{label}</span>
+        {effort && <span style={{ color: 'var(--dim)' }}>· {effort}</span>}
+        <ChevronDown className="w-3 h-3" style={{ color: 'var(--dim)' }} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ opacity: 0, y: 6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.98 }} transition={{ duration: 0.12 }} className="agent-menu">
+            <div className="label px-2 pt-1 pb-1.5">Model</div>
+            <button className="agent-menu-row" data-on={!model} onClick={() => setModel('')}>
+              <span className="flex-1 min-w-0">
+                <span className="block text-[12.5px] font-medium">Codex default</span>
+                <span className="block text-[11px] truncate" style={{ color: 'var(--dim)' }}>{codexDefault ? `${codexDefault.display_name}${models?.default_effort ? ` · ${models.default_effort}` : ''}, from your Codex settings` : 'Whatever your Codex settings pick'}</span>
+              </span>
+              {!model && <Check className="w-3.5 h-3.5" />}
+            </button>
+            <div className="max-h-[260px] overflow-y-auto">
+              {list.map((m) => (
+                <button key={m.slug} className="agent-menu-row" data-on={m.slug === model} onClick={() => setModel(m.slug)}>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[12.5px] font-medium">{m.display_name}</span>
+                    {m.description && <span className="block text-[11px] truncate" style={{ color: 'var(--dim)' }}>{m.description}</span>}
+                  </span>
+                  {m.slug === model && <Check className="w-3.5 h-3.5" />}
+                </button>
+              ))}
+              {!list.length && <p className="px-2 py-2 text-[11.5px]" style={{ color: 'var(--dim)' }}>Codex didn’t list any models. Disko will use your Codex default.</p>}
+            </div>
+            {efforts.length > 0 && (
+              <>
+                <div className="label px-2 pt-2.5 pb-1.5">Thinking</div>
+                <div className="flex flex-wrap gap-1 px-1.5 pb-1">
+                  <button className="agent-effort" data-on={!effort} onClick={() => setEffort('')}>default</button>
+                  {efforts.map((e) => <button key={e} className="agent-effort" data-on={effort === e} onClick={() => setEffort(e)}>{e}</button>)}
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** What the agent just moved, with undo and the one action only the user may take: emptying. */
+function QuarantineCard({ result }: { result: any }) {
+  const journals = useStore((s) => s.journals);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  const [outcome, setOutcome] = useState<'restored' | 'emptied' | null>(null);
+  const journal = journals.find((j) => j.id === result?.batch_id);
+  const present = journal?.items.filter((i) => i.present) ?? [];
+  const moved: string[] = result?.moved ?? [];
+  const home = useStore((s) => s.info?.home ?? '');
+  const refresh = () => { const st = useStore.getState(); st.refreshJournals(); st.reloadData(); st.refreshCurrent(); };
+  const run = async (kind: 'undo' | 'empty') => {
+    if (!journal) return;
+    setBusy(kind);
+    try {
+      if (kind === 'undo') { await api.restore(journal.path); setOutcome('restored'); useStore.getState().toast({ kind: 'success', title: 'Put back where it was' }); }
+      else { const freed = await api.purge(journal.path); setOutcome('emptied'); useStore.getState().toast({ kind: 'success', title: `Freed ${formatBytes(freed)}` }); }
+      refresh();
+    } catch (e) {
+      useStore.getState().toast({ kind: 'error', title: kind === 'undo' ? 'Could not restore' : 'Could not empty', detail: errorText(e) });
+    } finally { setBusy(null); setConfirm(false); }
+  };
+  if (!moved.length) return null;
+  // Until the journal list catches up, a fresh batch counts as held.
+  const state = outcome ?? (!journal || present.length > 0 ? 'held' : journal.purged ? 'emptied' : 'restored');
+  return (
+    <div className="agent-qcard" data-state={state}>
+      <div className="flex items-center gap-2.5">
+                <div className="flex-1 min-w-0">
+          <div className="text-[12.5px] font-semibold">{state === 'emptied' ? `Emptied · ${result.size} freed` : state === 'restored' ? 'Restored' : `${result.size} in quarantine`}</div>
+          <div className="text-[11px]" style={{ color: 'var(--dim)' }}>{moved.length} {moved.length === 1 ? 'item' : 'items'}{state === 'held' ? ' · not deleted yet' : ''}</div>
+        </div>
+      </div>
+      <ul className="mt-2 space-y-0.5">
+        {moved.slice(0, 4).map((p) => <li key={p} className="mono text-[10.5px] truncate selectable" style={{ color: 'var(--muted)' }} title={p}>{shortPath(p, home)}</li>)}
+        {moved.length > 4 && <li className="text-[10.5px]" style={{ color: 'var(--dim)' }}>and {moved.length - 4} more</li>}
+      </ul>
+      {state === 'held' && (
+        <div className="flex gap-1.5 mt-2.5">
+          <button className="btn btn-sm" disabled={!!busy || !journal} onClick={() => run('undo')}><Undo2 className="w-3 h-3" /> Undo</button>
+          {confirm ? (
+            <button className="btn btn-sm btn-danger" disabled={!!busy} onClick={() => run('empty')}>{busy === 'empty' ? 'Emptying…' : 'Delete for good'}</button>
+          ) : (
+            <button className="btn btn-sm" disabled={!!busy || !journal} onClick={() => setConfirm(true)}><Trash2 className="w-3 h-3" /> Empty to free {result.size}</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const Message: React.FC<{ m: ChatMessage; home: string; isStaged: (p: string) => boolean; onToggle: (s: Suggestion) => void; onStageAll: (s: Suggestion[]) => void }> = ({ m, home, isStaged, onToggle, onStageAll }) => {
   const [showActivity, setShowActivity] = useState(false);
   const isUser = m.role === 'user';
   const activity = m.activity ?? [];
+  const steps = activity.filter((a) => a.type !== 'tool');
+  const tools = activity.filter((a) => a.type === 'tool');
   const running = activity.filter((a) => a.status === 'running');
   const displayText = m.streaming ? extractSuggestions(m.text).clean : m.text;
 
   if (isUser) {
     return (
-      <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="flex justify-end my-3">
-        <div className="max-w-[88%] rounded-xl px-3 py-2 text-[13px] leading-relaxed selectable" style={{ background: 'var(--bg-3)' }}>{m.text}</div>
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex justify-end my-3">
+        <div className="agent-user selectable">{m.text}</div>
       </motion.div>
     );
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="my-3">
-      {activity.length > 0 && (
-        <div className="mb-1.5">
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="my-3">
+      {steps.length > 0 && (
+        <div className="mb-2">
           <button className="flex items-center gap-1.5 text-[11.5px] text-left max-w-full" style={{ color: 'var(--muted)' }} onClick={() => setShowActivity(!showActivity)}>
             {running.length ? <span className="dots"><span /><span /><span /></span> : null}
-            <span className={`truncate min-w-0 ${running.length ? 'mono text-[11px]' : ''}`}>{running.length ? summarizeCommand(running[running.length - 1].title) : `${activity.length} step${activity.length === 1 ? '' : 's'}`}</span>
+            <span className={`truncate min-w-0 ${running.length && running[running.length - 1].type === 'command' ? 'mono text-[11px]' : ''}`}>{running.length ? running[running.length - 1].title : `${steps.length} step${steps.length === 1 ? '' : 's'}`}</span>
             <ChevronRight className={`w-3 h-3 flex-shrink-0 transition-transform ${showActivity ? 'rotate-90' : ''}`} />
           </button>
           <AnimatePresence>
             {showActivity && (
               <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                 <div className="mt-1.5 space-y-1 pl-2" style={{ borderLeft: '2px solid var(--line-2)' }}>
-                  {activity.map((a) => (
+                  {steps.map((a) => (
                     <div key={a.id} className="text-[11px]">
                       <span className={`${a.type === 'command' ? 'mono' : ''} break-all selectable`} style={{ color: a.status === 'failed' ? 'var(--danger)' : a.type === 'reasoning' ? 'var(--dim)' : 'var(--muted)' }}>{a.title}</span>
                       {a.detail && a.type === 'command' && <pre className="mono mt-1 text-[10.5px] max-h-36 overflow-auto whitespace-pre-wrap selectable" style={{ color: 'var(--dim)' }}>{a.detail}</pre>}
@@ -283,21 +405,31 @@ const Message: React.FC<{ m: ChatMessage; home: string; isStaged: (p: string) =>
         </div>
       )}
 
+      {tools.map((t) => (
+        <motion.div key={t.id} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="mb-2">
+          <div className="agent-tool" data-status={t.status}>
+            {t.status === 'running' ? <span className="dots"><span /><span /><span /></span> : t.status === 'failed' ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+            <span className="truncate">{t.title}</span>
+          </div>
+          {t.tool === 'quarantine' && t.status === 'done' && <QuarantineCard result={t.result} />}
+        </motion.div>
+      ))}
+
       {displayText ? (
         <div className="md selectable"><ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown></div>
-      ) : m.streaming ? (
+      ) : m.streaming && !running.length ? (
         <span className="dots" style={{ color: 'var(--muted)' }}><span /><span /><span /></span>
       ) : null}
 
       {m.error && <p className="mt-2 text-[12px] selectable" style={{ color: 'var(--danger)' }}>{m.error}</p>}
 
       {m.suggestions && m.suggestions.length > 0 && (
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--line)' }}>
+        <div className="agent-suggest">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="label">Suggested</span>
+            <span className="label">Needs your OK</span>
             {m.suggestions.some((s) => s.action !== 'command') && (
               <button className="btn btn-sm" onClick={() => onStageAll(m.suggestions!)}>
-                Collect all{m.suggestions.some((s) => s.bytes) ? ` · ${formatBytes(m.suggestions.filter((s) => s.action !== 'command').reduce((a, b) => a + (b.bytes ?? 0), 0))}` : ''}
+                <Plus className="w-3 h-3" /> Collect all{m.suggestions.some((s) => s.bytes) ? ` · ${formatBytes(m.suggestions.filter((s) => s.action !== 'command').reduce((a, b) => a + (b.bytes ?? 0), 0))}` : ''}
               </button>
             )}
           </div>

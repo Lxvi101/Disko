@@ -133,7 +133,7 @@ export const useStore = create<AppState>((set, get) => ({
   overview: null,
   models: null,
 
-  page: 'explore',
+  page: 'quick',
   viz: 'sunburst',
   currentPath: '',
   rootPath: '',
@@ -167,10 +167,11 @@ export const useStore = create<AppState>((set, get) => ({
   assistantOpen: false,
   messages: [],
   generating: null,
-  model: '',
-  effort: '',
+  // '' means "whatever Codex picks": the model and effort from ~/.codex/config.toml.
+  model: (() => { try { return localStorage.getItem('disko.model') ?? ''; } catch { return ''; } })(),
+  effort: (() => { try { return localStorage.getItem('disko.effort') ?? ''; } catch { return ''; } })(),
 
-  startScreen: true,
+  startScreen: false,
   scans: [],
   autoscan: null,
   paletteOpen: false,
@@ -198,8 +199,9 @@ export const useStore = create<AppState>((set, get) => ({
         .then((models) =>
           set((s) => ({
             models,
-            model: s.model || models.default_model,
-            effort: s.effort || models.default_effort,
+            // A remembered model that this Codex no longer offers falls back to Codex's own default.
+            model: s.model && models.models.some((m) => m.slug === s.model) ? s.model : '',
+            effort: s.model && models.models.some((m) => m.slug === s.model) ? s.effort : '',
           })),
         )
         .catch(() => {});
@@ -268,7 +270,7 @@ export const useStore = create<AppState>((set, get) => ({
   setHover: (hoverPath) => set({ hoverPath }),
   setAdvanced: (advanced) => {
     try { localStorage.setItem('disko.advanced', advanced ? '1' : '0'); } catch {}
-    set((s) => ({ advanced, page: advanced ? s.page : 'explore', assistantOpen: advanced ? s.assistantOpen : false }));
+    set({ advanced });
   },
   setColorBy: (colorBy) => set({ colorBy }),
   setTheme: (theme) => {
@@ -285,7 +287,7 @@ export const useStore = create<AppState>((set, get) => ({
     // Keep the native window colour in sync so resizing never flashes the other theme.
     import('@tauri-apps/api/window')
       .then(({ getCurrentWindow }) => {
-        const c = resolved === 'light' ? { red: 246, green: 246, blue: 247, alpha: 1 } : { red: 27, green: 28, blue: 32, alpha: 1 };
+        const c = resolved === 'light' ? { red: 243, green: 243, blue: 247, alpha: 1 } : { red: 15, green: 16, blue: 21, alpha: 1 };
         return getCurrentWindow().setBackgroundColor(c);
       })
       .catch(() => {});
@@ -342,9 +344,11 @@ export const useStore = create<AppState>((set, get) => ({
   setAssistantOpen: (assistantOpen) => set({ assistantOpen }),
   setModel: (model) => {
     const m = get().models?.models.find((x) => x.slug === model);
-    set((s) => ({ model, effort: m && !m.efforts.includes(s.effort) ? m.default_effort : s.effort }));
+    const effort = m && m.efforts.includes(get().effort) ? get().effort : '';
+    try { localStorage.setItem('disko.model', model); localStorage.setItem('disko.effort', effort); } catch {}
+    set({ model, effort });
   },
-  setEffort: (effort) => set({ effort }),
+  setEffort: (effort) => { try { localStorage.setItem('disko.effort', effort); } catch {} set({ effort }); },
   pushMessage: (m) => set((s) => ({ messages: [...s.messages, m] })),
   updateMessage: (id, patch) =>
     set((s) => ({
