@@ -1,6 +1,6 @@
 [package]
 name = "disko"
-version = "0.3.2"
+version = "0.4.0"
 description = "Disko — disk space visualizer and Codex cleanup assistant"
 authors = ["Levi B"]
 license = "MIT"
