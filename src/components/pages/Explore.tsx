@@ -1,28 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Check, Eye, ChevronRight } from 'lucide-react';
-import { useStore } from '../../store';
+import { Plus, Check, Eye, EyeOff, ChevronLeft, ChevronRight, Pin } from 'lucide-react';
+import { useStore, type HiddenItem } from '../../store';
 import { api } from '../../lib/api';
 import { formatBytes, catMeta, formatDate, tagLabel, ACTION_LABELS, COST_LABELS } from '../../lib/format';
-import { HIDDEN_COLOR, layoutTree, simplifyTree, folderForHover, RINGS } from '../../lib/sunburst';
+import { HIDDEN_COLOR, layoutTree, simplifyTree, folderForHover, withoutHidden, accountedDatum, isInside, RINGS } from '../../lib/sunburst';
 import { restColor } from '../../lib/colors';
 import { GREY } from '../../lib/colors';
 import type { FileItem, TreeNode } from '../../types';
 import { Sunburst } from '../viz/Sunburst';
-import { openExploreMenu } from '../ContextMenu';
+import { Treemap } from '../viz/Treemap';
+import { openExploreMenu, hideFromMap } from '../ContextMenu';
 
 export const ExplorePage: React.FC = () => {
-  const { currentPath, rootPath, currentItems, itemsLoading, navigate, navigateUp, staged, toggleStage, isStaged, advanced, colorBy, hoverPath, setHover, selectedPath, select, info, overview, resolvedTheme, dataVersion } = useStore();
+  const { currentPath, rootPath, currentItems, itemsLoading, navigate, navigateUp, staged, toggleStage, isStaged, advanced, colorBy, hoverPath, setHover, selectedPath, select, info, overview, resolvedTheme, dataVersion, viz, hiddenItems } = useStore();
   const [loadedTree, setTree] = useState<TreeNode | null>(null);
   // Navigation commits the path/items before its subtree request completes.
   // Never use the previous folder's tree for the new folder's legend or preview.
-  const tree = loadedTree?.path === currentPath ? loadedTree : null;
+  const fullTree = loadedTree?.path === currentPath ? loadedTree : null;
+  // Everything below works on the tree without the items the user hid.
+  const hiddenSet = useMemo(() => new Set(hiddenItems.map((h) => h.path)), [hiddenItems]);
+  const pruned = useMemo(() => (fullTree ? withoutHidden(fullTree, hiddenSet) : null), [fullTree, hiddenSet]);
+  const tree = pruned?.tree ?? null;
+  const removed = pruned?.removed ?? 0;
+  const hiddenHere = useMemo(() => hiddenItems.filter((h) => isInside(h.path, currentPath)), [hiddenItems, currentPath]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [colors, setColors] = useState<Map<string, string>>(new Map());
-  const lastPath = useRef<string>('');
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [expandedRemainder, setExpandedRemainder] = useState<string | null>(null);
-  const [direction, setDirection] = useState<'in' | 'out' | 'none'>('none');
 
   const stagedPaths = useMemo(() => new Set(staged.map((s) => s.path)), [staged]);
   const rootLabel = rootPath === '/' ? 'Macintosh HD' : rootPath === info?.home ? 'Home' : rootPath.split('/').filter(Boolean).pop() ?? 'Root';
@@ -30,9 +35,6 @@ export const ExplorePage: React.FC = () => {
   useEffect(() => {
     if (!currentPath) return;
     setPreviewPath(null);
-    const prev = lastPath.current;
-    setDirection(!prev ? 'none' : currentPath.startsWith(prev + '/') ? 'in' : prev.startsWith(currentPath + '/') ? 'out' : 'none');
-    lastPath.current = currentPath;
     let cancelled = false;
     setTreeLoading(true);
     api
@@ -75,15 +77,16 @@ export const ExplorePage: React.FC = () => {
   }, [setHover]);
 
   const volume = currentPath === '/' ? overview?.volume ?? info?.volume : undefined;
-  const accounting = useMemo(() => displayTree ? layoutTree(displayTree, volume) : null, [displayTree, volume]);
+  const accounting = useMemo(() => displayTree ? layoutTree(displayTree, volume, removed) : null, [displayTree, volume, removed]);
+  const blocks = useMemo(() => displayTree && viz === 'treemap' ? accountedDatum(displayTree, volume, removed).datum : null, [displayTree, volume, removed, viz]);
 
   const listItems: FileItem[] = useMemo(() => {
     if (listParent) {
       return listParent.children.map((c) => ({ path: c.path, name: c.name, kind: c.kind, total: c.total, allocated: 0, logical: 0, category: c.category, reason: c.reason, tag: c.tag, action: c.action, cost: 'unknown' }));
     }
     if (!advanced && displayTree) return displayTree.children.map(c => ({ ...c, allocated: 0, logical: 0, cost: 'unknown' }));
-    return currentItems;
-  }, [listParent, currentItems, displayTree, advanced]);
+    return hiddenSet.size ? currentItems.filter((i) => !hiddenSet.has(i.path)) : currentItems;
+  }, [listParent, currentItems, displayTree, advanced, hiddenSet]);
 
   const listTitle = listParent ? listParent.name : currentPath === rootPath ? rootLabel : currentPath.split('/').filter(Boolean).pop() ?? '';
   const listTotal = listParent ? listParent.total : accounting?.total ?? tree?.total ?? currentItems.reduce((a, b) => a + b.total, 0);
@@ -112,9 +115,45 @@ export const ExplorePage: React.FC = () => {
 
   const canGoUp = currentPath !== rootPath && currentPath.length > rootPath.length;
 
+  // H hides whatever is under the pointer, in the map or the list.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setPreviewPath(null); return; }
+      if (e.key.toLowerCase() !== 'h' || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const path = useStore.getState().hoverPath;
+      const find = (n: TreeNode): TreeNode | undefined => n.path === path ? n : n.children.map(find).find(Boolean);
+      const it = (path && tree && path !== tree.path ? find(tree) : undefined) ?? listItems.find((i) => i.path === path);
+      if (!it) return;
+      e.preventDefault();
+      hideFromMap(it);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tree, listItems]);
+
   return (
     <div className={`h-full flex min-h-0 ${advanced ? '' : 'standard-explore'}`} onMouseLeave={() => { setPreviewPath(null); setHover(null); }}>
-      <div className="explore-wheel flex-1 min-w-0 min-h-0 p-6 pr-2">
+      <div className={`explore-wheel relative flex-1 min-w-0 min-h-0 p-6 pr-2 ${viz === 'treemap' ? 'blocks-view' : ''}`}>
+        {viz === 'treemap' ? (
+          <Treemap
+            datum={blocks}
+            path={tree?.path ?? null}
+            loading={treeLoading || itemsLoading}
+            hoverPath={hoverPath}
+            colorBy={advanced ? colorBy : 'folder'}
+            stagedPaths={stagedPaths}
+            onHover={onChartHover}
+            onNavigate={navigate}
+            onRemainder={path => {
+              if (advanced || path !== currentPath) navigate(path);
+              if (!advanced) setExpandedRemainder(path);
+            }}
+            onLayout={onLayout}
+            onContextMenu={(d, e) => openExploreMenu(e, d, colors.get(d.path))}
+          />
+        ) : (
         <Sunburst
           tree={tree}
           layout={accounting}
@@ -131,12 +170,18 @@ export const ExplorePage: React.FC = () => {
           }}
           onUp={navigateUp}
           onLayout={onLayout}
-          direction={direction}
           onContextMenu={(d, e) => openExploreMenu(e, d, colors.get(d.path))}
         />
+        )}
+        <HiddenTray items={hiddenHere} />
       </div>
 
       <div className="explore-legend w-[380px] flex-shrink-0 flex flex-col min-h-0 pr-6 pt-4 pb-4">
+        {/* Hovering the chart previews a folder here; this is always the way back. Space is
+            reserved even when hidden, so the list does not jump while the pointer moves. */}
+        <button type="button" className="legend-back" style={{ visibility: listParent ? 'visible' : 'hidden' }} onClick={() => setPreviewPath(null)} tabIndex={listParent ? 0 : -1}>
+          <ChevronLeft className="w-3.5 h-3.5" /> Back to {currentPath === rootPath ? rootLabel : currentPath.split('/').filter(Boolean).pop()}
+        </button>
         <div className="legend-heading flex items-baseline justify-between px-2 pb-2">
           {/* The heading must commit with its rows and total, including rapid chart hovers. */}
           <button type="button" disabled={!listParent} onClick={() => setPreviewPath(null)} title={listParent ? 'Return to the current folder' : undefined} className="text-[13px] font-semibold truncate">
@@ -171,11 +216,11 @@ export const ExplorePage: React.FC = () => {
               {remainderExpanded && smallerItems.map(it => (
                 <Row key={it.path} it={it} color={GREY} hovered={hoverPath === it.path} selected={selectedPath === it.path} staged={isStaged(it.path)} advanced={false} onHover={setHover} onOpen={onOpen} onSelect={onSelect} onStage={onStage} onDragStart={onDragStart} />
               ))}
-              {remainderExpanded && smallerItems.length === 0 && <div className="px-5 py-2 text-[12px]" style={{ color: 'var(--muted)' }}>Use Advanced → Files to browse the remaining small items.</div>}
+              {remainderExpanded && smallerItems.length === 0 && <div className="px-5 py-2 text-[12px]" style={{ color: 'var(--muted)' }}>Turn on Details (⌘.) to list every item in this folder.</div>}
             </>
           )}
           {!listParent && (accounting?.hidden ?? 0) > 0 && (
-            <SpaceRow label="hidden space…" total={accounting!.hidden} color={HIDDEN_COLOR} accent title="Used volume space not accounted for by the scan, including inaccessible files and filesystem data." />
+            <SpaceRow label="unmeasured space…" total={accounting!.hidden} color={HIDDEN_COLOR} accent title="Used space the scan could not measure: unreadable folders, system files and filesystem data." />
           )}
           {!listParent && volume && (
             <div className="legend-space">
@@ -195,6 +240,87 @@ export const ExplorePage: React.FC = () => {
           )}
         </AnimatePresence>
       </div>
+    </div>
+  );
+};
+
+/** Bottom-left pill for items hidden from this folder's map: bring back, or keep hidden next time. */
+const HiddenTray: React.FC<{ items: HiddenItem[] }> = ({ items }) => {
+  const { unhideItems, setHiddenPersist, info } = useStore();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const total = items.reduce((a, b) => a + b.total, 0);
+  useEffect(() => { if (!items.length) setOpen(false); }, [items.length]);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: MouseEvent) => { if (e.target instanceof Node && !ref.current?.contains(e.target)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
+    window.addEventListener('mousedown', outside, true);
+    window.addEventListener('keydown', key, true);
+    return () => { window.removeEventListener('mousedown', outside, true); window.removeEventListener('keydown', key, true); };
+  }, [open]);
+  const home = info?.home ?? '';
+  return (
+    <div ref={ref} className="absolute left-6 bottom-3" style={{ zIndex: 5 }}>
+      <AnimatePresence>
+        {items.length > 0 && (
+          <motion.button
+            key="pill"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            transition={{ duration: 0.16, ease: [0.2, 0.8, 0.2, 1] }}
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            className="hidden-pill flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[12px]"
+            style={{ background: open ? 'var(--bg-3)' : 'var(--bg-2)', border: '1px solid var(--line-2)', color: 'var(--muted)' }}
+            title="Items hidden from the map"
+          >
+            <EyeOff className="w-3.5 h-3.5" />
+            <span style={{ color: 'var(--text)' }}>{items.length} hidden</span>
+            <span className="tnum">· {formatBytes(total)}</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {open && items.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.98 }}
+            transition={{ duration: 0.14, ease: [0.2, 0.8, 0.2, 1] }}
+            className="absolute left-0 bottom-9 w-[340px] panel-raised p-1.5"
+            style={{ transformOrigin: 'bottom left' }}
+          >
+            <div className="max-h-[40vh] overflow-y-auto">
+              {items.map((h) => (
+                <div key={h.path} className="group flex items-center gap-2 pl-2 pr-1 h-8 rounded-md row-hover" title={h.path}>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[12.5px] truncate">{h.name}</span>
+                  </span>
+                  <span className="tnum text-[11.5px] flex-shrink-0" style={{ color: 'var(--muted)' }}>{formatBytes(h.total)}</span>
+                  <button
+                    className="btn btn-ghost btn-icon !p-1"
+                    aria-pressed={h.persist}
+                    title={h.persist ? 'Stays hidden next time. Click to only hide it until Disko quits.' : 'Keep hidden next time'}
+                    style={{ color: h.persist ? 'var(--text)' : 'var(--dim)' }}
+                    onClick={() => setHiddenPersist(h.path, !h.persist)}
+                  >
+                    <Pin className="w-3.5 h-3.5" fill={h.persist ? 'currentColor' : 'none'} />
+                  </button>
+                  <button className="btn btn-ghost btn-icon !p-1" title={`Show ${h.path.startsWith(home) && home ? '~' + h.path.slice(home.length) : h.path} again`} onClick={() => unhideItems([h.path])}>
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-2 px-2 pt-1.5 mt-1" style={{ borderTop: '1px solid var(--line)' }}>
+              <span className="text-[11px]" style={{ color: 'var(--dim)' }}>Pin to keep hidden next time</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => unhideItems(items.map((h) => h.path))}>Show all</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -227,7 +353,8 @@ const Row = React.memo<{
       onDragStart={(e) => onDragStart(it, e)}
       onMouseEnter={() => onHover(it.path)}
       onMouseLeave={() => onHover(null)}
-      onClick={() => onSelect(it)}
+      // Without the inspector a click has nothing to show, so it opens folders straight away.
+      onClick={() => (!advanced && isDir ? onOpen(it) : onSelect(it))}
       onDoubleClick={() => onOpen(it)}
       onContextMenu={(e) => openExploreMenu(e, it, color)}
       className="legend-row group flex items-center gap-2.5 px-2 rounded-lg cursor-default"
@@ -235,7 +362,7 @@ const Row = React.memo<{
       tabIndex={0}
       onKeyDown={e => {
         if (e.key === 'Enter') { e.preventDefault(); onOpen(it); }
-        if (e.key === ' ') { e.preventDefault(); onSelect(it); }
+        if (e.key === ' ') { e.preventDefault(); api.preview(it.path).catch(() => {}); }
       }}
       style={{ height: advanced ? 34 : 30, background: hovered || selected ? 'var(--bg-3)' : 'transparent', transition: 'background-color 90ms' }}
     >

@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Search, Sparkles, Trash2 } from 'lucide-react';
-import { useStore } from '../../store';
+import { useStore, useCollectedSelection } from '../../store';
 import { api, errorText } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
 import { clusterGroups, junkToGroups } from '../../lib/programs';
-import { ClusterBrowser, selectedBytes } from '../ClusterBrowser';
+import { ClusterBrowser } from '../ClusterBrowser';
 import { Empty, Spinner } from '../ui';
 import type { JunkItem, StagedItem } from '../../types';
 
@@ -30,12 +30,14 @@ export const JunkPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [q, setQ] = useState('');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const byPath = useMemo(() => new Map((items ?? []).map((i) => [i.path, i])), [items]);
+  const lookup = useCallback((p: string) => { const it = byPath.get(p); return it && toStaged(it); }, [byPath]);
+  const [selected, setSelected] = useCollectedSelection(lookup);
 
   useEffect(() => {
     let live = true;
     setError(null);
-    api.junk().then((r) => { if (live) { setItems(r); setSelected((old) => new Set([...old].filter((p) => r.some((i) => i.path === p)))); } }).catch((e) => live && setError(errorText(e)));
+    api.junk().then((r) => { if (live) setItems(r); }).catch((e) => live && setError(errorText(e)));
     return () => { live = false; };
   }, [version, db, refresh]);
 
@@ -45,12 +47,6 @@ export const JunkPage: React.FC = () => {
     return clusterGroups(junkToGroups(filtered, home));
   }, [items, q, home]);
   const total = (items ?? []).reduce((n, i) => n + i.total, 0);
-  const sel = selectedBytes(clusters, selected);
-  const clean = () => {
-    const chosen = (items ?? []).filter((i) => selected.has(i.path));
-    if (!chosen.length || useStore.getState().cleanupBusy) return;
-    useStore.setState({ cleanupSelection: chosen.map(toStaged), cleanupMode: 'quarantine', cleanModalOpen: true });
-  };
 
   if (error) return <Empty icon={<Trash2 className="w-6 h-6" />} title="Could not look for junk" body={error} action={<button className="btn" onClick={() => setRefresh((n) => n + 1)}>Try again</button>} />;
   if (!items) return <div className="h-full flex items-center justify-center gap-2 text-[12.5px]" style={{ color: 'var(--muted)' }}><Spinner /> Looking for junk…</div>;
@@ -63,7 +59,7 @@ export const JunkPage: React.FC = () => {
           <div>
             <h1 className="text-[28px] font-bold tracking-tight leading-none">Junk</h1>
             <p className="text-[13px] mt-2" style={{ color: 'var(--muted)' }}>
-              <strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(total)}</strong> in {items.length} places from your last disk scan, sorted by program. Cleaned items go to quarantine first.
+              <strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(total)}</strong> in {items.length} places from your last disk scan, sorted by program. Ticked items go to the Collector below.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -75,15 +71,6 @@ export const JunkPage: React.FC = () => {
           </div>
         </header>
         {clusters.length ? <ClusterBrowser clusters={clusters} selected={selected} onChange={setSelected} busy={busy} /> : <p className="py-12 text-center text-[12.5px]" style={{ color: 'var(--dim)' }}>Nothing matches “{q}”.</p>}
-        {sel.count > 0 && (
-          <div className="action-bar">
-            <span className="text-[12.5px] flex-1" style={{ color: 'var(--muted)' }}>
-              <strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(sel.bytes)}</strong> selected from {sel.count} {sel.count === 1 ? 'place' : 'places'}
-            </span>
-            <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(new Set())}>Clear</button>
-            <button className="btn btn-primary" disabled={busy} onClick={clean}>Clean up…</button>
-          </div>
-        )}
       </div>
     </div>
   );

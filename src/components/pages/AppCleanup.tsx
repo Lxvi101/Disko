@@ -1,20 +1,16 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Check, ChevronLeft, FolderOpen, LockKeyhole, RefreshCw, Search, Trash2 } from 'lucide-react';
-import { useStore } from '../../store';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ArrowUpRight, Check, ChevronLeft, FolderOpen, LockKeyhole, RefreshCw, Search } from 'lucide-react';
+import { useStore, useCollectedSelection } from '../../store';
 import { APP_CLEANERS, appCacheItems } from '../../lib/appCleanup';
 import { LIVE_APPS, type AppProfile } from '../../lib/appProfiles';
 import { api, errorText } from '../../lib/api';
 import { formatBytes, shortPath } from '../../lib/format';
 import { XcodeCleanupSection } from './Xcode';
 import { Spinner } from '../ui';
-import type { AppStorageInventory, CandidateItem, CleanupMode, StagedItem, XcodeInventory } from '../../types';
+import type { AppStorageInventory, CandidateItem, StagedItem, XcodeInventory } from '../../types';
 
 type Card = { id: string; name: string; category: string; color: string; mark: string; description: string; tagline: string; total?: number; potential?: number; count?: number; partial?: boolean; error?: string; scope: string };
 const sum = (items: { total: number }[]) => items.reduce((n, i) => n + i.total, 0);
-function clean(items: StagedItem[], mode: CleanupMode) {
-  if (!items.length || useStore.getState().cleanupBusy) return;
-  useStore.setState({ cleanupSelection: items, cleanupMode: mode, cleanModalOpen: true });
-}
 
 function AppIcon({ app, size = 56 }: { app: Pick<Card, 'id' | 'color' | 'mark'>; size?: number }) {
   const image = ['helium', 'xcode'].includes(app.id);
@@ -249,9 +245,10 @@ function Info({ label, value, sub }: { label: string; value: React.ReactNode; su
 
 type ListItem = { path: string; name: string; total: number; detail: string; blocked?: string | null; partial?: boolean };
 
-/** A checklist of removable entries with one clean-up action at the bottom. */
-function ItemList({ items, home, busy, color, onClean }: { items: ListItem[]; home: string; busy: boolean; color: string; onClean: (paths: ListItem[], mode: CleanupMode) => void }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+/** A checklist of removable entries; ticking one puts it in the Collector. */
+function ItemList({ items, home, busy, toStaged }: { items: ListItem[]; home: string; busy: boolean; toStaged: (item: ListItem) => StagedItem }) {
+  const lookup = useCallback((p: string) => { const it = items.find((i) => i.path === p); return it && toStaged(it); }, [items, toStaged]);
+  const [selected, setSelected] = useCollectedSelection(lookup);
   const available = items.filter((item) => !item.blocked);
   const chosen = available.filter((item) => selected.has(item.path));
   const toggle = (path: string) => setSelected((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
@@ -260,7 +257,7 @@ function ItemList({ items, home, busy, color, onClean }: { items: ListItem[]; ho
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-[20px] font-bold tracking-tight">What you can clean</h2>
         {available.length > 1 && (
-          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setSelected(new Set(chosen.length === available.length ? [] : available.map((i) => i.path)))}>
+          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setSelected((old) => { const next = new Set(old); available.forEach((i) => chosen.length === available.length ? next.delete(i.path) : next.add(i.path)); return next; })}>
             {chosen.length === available.length ? 'Select none' : 'Select all'}
           </button>
         )}
@@ -281,24 +278,15 @@ function ItemList({ items, home, busy, color, onClean }: { items: ListItem[]; ho
         ))}
         {!items.length && <p className="text-center p-10 text-[12.5px]" style={{ color: 'var(--muted)' }}>Nothing to clean here right now.</p>}
       </div>
-      {items.length > 0 && (
-        <div className="app-store-actions">
-          <span className="text-[12.5px] flex-1" style={{ color: 'var(--muted)' }}>
-            {chosen.length ? <><strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(sum(chosen))}</strong> selected from {chosen.length} item{chosen.length === 1 ? '' : 's'}</> : 'Select the items you want to remove.'}
-          </span>
-          <button className="btn btn-ghost" disabled={busy || !chosen.length} title="Delete permanently…" onClick={() => onClean(chosen, 'delete')}><Trash2 className="w-3.5 h-3.5" /></button>
-          <button className="app-pill solid" style={{ '--app-color': color } as React.CSSProperties} disabled={busy || !chosen.length} onClick={() => onClean(chosen, 'quarantine')}>Clean up…</button>
-        </div>
-      )}
     </section>
   );
 }
 
 function AppDetail({ app, inventory, home, busy }: { app: AppProfile; inventory: AppStorageInventory; home: string; busy: boolean }) {
-  const staged = (items: ListItem[]): StagedItem[] => items.map((item) => {
+  const staged = useCallback((item: ListItem): StagedItem => {
     const group = inventory.items.find((i) => i.path === item.path)?.group;
     return { path: item.path, name: item.name, total: item.total, kind: group === 'version' && app.id === 'claude' ? 'file' : 'directory', category: group === 'version' ? 'review' : 'rebuildable', reason: app.consequence, source: 'suggestion' };
-  });
+  }, [inventory, app]);
   return (
     <>
       {inventory.warnings.map((warning) => <p key={warning} role="status" className="text-[12px] mt-4" style={{ color: 'var(--warn)' }}>{warning}</p>)}
@@ -306,8 +294,7 @@ function AppDetail({ app, inventory, home, busy }: { app: AppProfile; inventory:
         items={inventory.items.map((i) => ({ path: i.path, name: i.name, total: i.total, detail: i.subtitle, blocked: i.blocked, partial: i.partial }))}
         home={home}
         busy={busy}
-        color={app.color}
-        onClean={(items, mode) => clean(staged(items), mode)}
+        toStaged={staged}
       />
     </>
   );
@@ -321,8 +308,7 @@ function ScannedDetail({ app, home, busy }: { app: (typeof APP_CLEANERS)[number]
         items={app.items.map((i) => ({ path: i.path, name: i.name, total: i.total, detail: 'Cache · rebuilt when needed' }))}
         home={home}
         busy={busy}
-        color={app.color}
-        onClean={(items, mode) => clean(items.map((item) => ({ ...app.items.find((c) => c.path === item.path)!, source: 'suggestion' })), mode)}
+        toStaged={useCallback((item: ListItem): StagedItem => ({ ...app.items.find((c) => c.path === item.path)!, source: 'suggestion' }), [app])}
       />
     </>
   );

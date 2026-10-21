@@ -1,4 +1,4 @@
-import { hierarchy, partition, type HierarchyRectangularNode } from 'd3-hierarchy';
+import { hierarchy, partition, type HierarchyNode, type HierarchyRectangularNode } from 'd3-hierarchy';
 import type { TreeNode, VolumeInfo } from '../types';
 
 export const RINGS = [1, 1, 1, 1, 1, 0.16, 0.16, 0.16, 0.16];
@@ -29,6 +29,32 @@ export function folderForHover(tree: TreeNode, path: string | null): TreeNode | 
   };
   const folder = find(tree, null);
   return folder?.path === tree.path ? null : folder;
+}
+
+/** True when `path` lies strictly inside the folder `dir`. */
+export function isInside(path: string, dir: string): boolean {
+  return dir === '/' ? path !== '/' && path.startsWith('/') : path.startsWith(dir + '/');
+}
+
+/**
+ * Drop hidden items and shrink every ancestor by their bytes, so the remaining items
+ * take over the freed space. Returns the source tree untouched when nothing is hidden.
+ */
+export function withoutHidden(tree: TreeNode, hidden: ReadonlySet<string>): { tree: TreeNode; removed: number } {
+  if (!hidden.size) return { tree, removed: 0 };
+  const prune = (n: TreeNode): { node: TreeNode; removed: number } => {
+    let removed = 0;
+    const children: TreeNode[] = [];
+    for (const c of n.children) {
+      if (hidden.has(c.path)) { removed += c.total; continue; }
+      const r = prune(c);
+      removed += r.removed;
+      children.push(r.node);
+    }
+    return removed ? { node: { ...n, children, total: Math.max(0, n.total - removed) }, removed } : { node: n, removed: 0 };
+  };
+  const r = prune(tree);
+  return { tree: r.node, removed: r.removed };
 }
 
 export function simplifyTree(tree: TreeNode): TreeNode {
@@ -74,7 +100,7 @@ export interface Layout {
   hidden: number;
 }
 
-function toDatum(n: TreeNode): Datum {
+export function toDatum(n: TreeNode): Datum {
   const children = n.children.map(toDatum);
   if (n.rest_total > 0) children.push({
     name: 'smaller objects…', path: `${n.path.replace(/\/$/, '')}/…`, kind: 'rest',
@@ -83,21 +109,39 @@ function toDatum(n: TreeNode): Datum {
   return { ...n, total: Math.max(n.total, children.reduce((sum, c) => sum + c.total, 0)), children };
 }
 
-/** Preserve each folder's own size, including bytes not represented by its children. */
-export function layoutTree(tree: TreeNode, volume?: VolumeInfo): Layout {
+/**
+ * The tree as drawable data, plus the volume's unaccounted space when drawing a whole disk.
+ * `excluded` is the size of items the user hid, which must not turn into unaccounted space.
+ */
+export function accountedDatum(tree: TreeNode, volume?: VolumeInfo, excluded = 0): { datum: Datum; total: number; hidden: number } {
   const datum = toDatum(tree);
   const scanned = datum.total;
-  const hidden = volume ? Math.max(0, volume.used - scanned) : 0;
+  const hidden = volume ? Math.max(0, volume.used - excluded - scanned) : 0;
   if (hidden > 0) datum.children!.push({
-    name: 'hidden space…', path: 'disko:hidden', kind: 'hidden', total: hidden,
-    category: 'protected', reason: 'Used volume space not accounted for by the scan.', isHidden: true,
+    name: 'unmeasured space…', path: 'disko:hidden', kind: 'hidden', total: hidden,
+    category: 'protected', reason: 'Used space the scan could not measure: unreadable folders, system files and filesystem data.', isHidden: true,
   });
-  const total = scanned + hidden;
+  return { datum, total: scanned + hidden, hidden };
+}
+
+/** Each node's own bytes; folders keep space not represented by their children. */
+export function ownBytes(d: Datum): number {
+  return Math.max(0, d.total - (d.children?.reduce((sum, c) => sum + c.total, 0) ?? 0));
+}
+
+/** Largest first; the grouped remainder and unaccounted space always come last. */
+export function compareArcs(a: HierarchyNode<Datum>, b: HierarchyNode<Datum>): number {
+  return Number(!!a.data.isHidden) - Number(!!b.data.isHidden)
+    || Number(!!a.data.isRest) - Number(!!b.data.isRest) || (b.value ?? 0) - (a.value ?? 0);
+}
+
+/** Preserve each folder's own size, including bytes not represented by its children. */
+export function layoutTree(tree: TreeNode, volume?: VolumeInfo, excluded = 0): Layout {
+  const { datum, total, hidden } = accountedDatum(tree, volume, excluded);
   // The root's own value reserves free space without creating a painted segment.
-  datum.total = volume ? Math.max(volume.total, total + Math.max(0, volume.available)) : total;
-  const root = hierarchy(datum).sum(d => Math.max(0, d.total - (d.children?.reduce((sum, c) => sum + c.total, 0) ?? 0)));
-  root.sort((a, b) => Number(!!a.data.isHidden) - Number(!!b.data.isHidden)
-    || Number(!!a.data.isRest) - Number(!!b.data.isRest) || (b.value ?? 0) - (a.value ?? 0));
+  datum.total = volume ? Math.max(volume.total - excluded, total + Math.max(0, volume.available)) : total;
+  const root = hierarchy(datum).sum(ownBytes);
+  root.sort(compareArcs);
   const part = partition<Datum>().size([2 * Math.PI, RINGS.length])(root);
   const nodes = part.descendants().filter(d => d.depth > 0 && d.depth <= RINGS.length && d.x1 - d.x0 > 0.0006) as ArcNode[];
   const byDepth: ArcNode[][] = Array.from({ length: RINGS.length + 1 }, () => []);

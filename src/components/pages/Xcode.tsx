@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, Box, Check, ChevronRight, Code2, Cpu, Eye, Folder, Info, Search, Smartphone, Trash2 } from 'lucide-react';
+import { Archive, Box, ChevronRight, Code2, Cpu, Eye, Folder, Info, Search, Smartphone, Trash2 } from 'lucide-react';
 import { api, errorText } from '../../lib/api';
 import { formatBytes, shortPath } from '../../lib/format';
-import { useStore } from '../../store';
+import { useStore, useCollectedSelection } from '../../store';
 import { Modal, Spinner } from '../ui';
 import type { CleanupMode, StagedItem, XcodeInventory, XcodeItem } from '../../types';
 
@@ -28,23 +28,22 @@ export const XcodeCleanupSection: React.FC<{ snapshot?: XcodeInventory; onRefres
   const [group, setGroup] = useState('simulators');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<XcodeItem | string | null>(null);
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
-    if (snapshot) { setInventory(snapshot); setLoading(false); setError(null); setSelected(new Set()); return; }
+    if (snapshot) { setInventory(snapshot); setLoading(false); setError(null); return; }
     let active = true;
     setLoading(true); setError(null);
-    api.xcodeStorage().then((data) => { if (active) { setInventory(data); setSelected((old) => new Set([...old].filter((p) => data.items.some((i) => i.path === p && !i.blocked)))); } })
+    api.xcodeStorage().then((data) => { if (active) setInventory(data); })
       .catch((e) => { if (active) setError(errorText(e)); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [version, refresh, snapshot]);
   const items = inventory?.items ?? [];
+  const lookup = useCallback((p: string) => { const it = items.find((i) => i.path === p && !i.blocked); return it && asStaged(it); }, [items]);
+  const [selected, setSelected] = useCollectedSelection(lookup);
   const activeGroup = groupFor(group);
   const totals = useMemo(() => Object.fromEntries(GROUPS.map((g) => [g.id, items.filter((i) => i.group === g.id).reduce((n, i) => n + i.total, 0)])), [inventory]);
   const visible = items.filter((i) => i.group === group && `${i.name} ${i.path} ${i.subtitle}`.toLowerCase().includes(query.toLowerCase()) && (filter === 'all' || i.badges.includes(filter)));
-  const chosen = items.filter((i) => selected.has(i.path) && !i.blocked);
-  const selectedBytes = chosen.reduce((sum, i) => sum + i.total, 0);
   const toggle = (path: string) => setSelected((old) => { const next = new Set(old); next.has(path) ? next.delete(path) : next.add(path); return next; });
   const clean = useCallback((targets: XcodeItem[], mode: CleanupMode) => {
     if (!targets.length || useStore.getState().cleanupBusy) return;
@@ -92,12 +91,6 @@ export const XcodeCleanupSection: React.FC<{ snapshot?: XcodeInventory; onRefres
       {!loading && visible.length === 0 && <div className="p-12 text-center text-[12px]" style={{ color: 'var(--muted)' }}>{items.some((i) => i.group === group) ? 'No entries match this filter.' : 'No entries found in these locations.'}</div>}
     </div>
     <div className="mt-3 text-[11px] flex gap-2" style={{ color: 'var(--dim)' }}><Info className="w-3.5 h-3.5 flex-shrink-0" /><p>Live inventory of standard locations. Sizes are estimates; shared APFS blocks and snapshots can change the space reclaimed. Modified dates do not prove inactivity. Shared OS runtimes are managed in Xcode → Settings → Components.</p></div>
-    {chosen.length > 0 && <div className="sticky bottom-0 mt-4 panel-raised px-4 py-3 flex items-center gap-3">
-      <Check className="w-4 h-4" /><span className="text-[12px] flex-1">{chosen.length} selected across categories <span className="tnum font-semibold">· {formatBytes(selectedBytes)}</span></span>
-      <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setSelected(new Set())}>Clear</button>
-      <button className="btn" disabled={busy || loading || !!error} onClick={() => clean(chosen, 'quarantine')}><Archive className="w-3.5 h-3.5" /> Quarantine…</button>
-      <button className="btn btn-primary" disabled={busy || loading || !!error} onClick={() => clean(chosen, 'delete')}><Trash2 className="w-3.5 h-3.5" /> Delete…</button>
-    </div>}
     <Modal open={detail !== null} onClose={() => setDetail(null)} title={detailItem?.name ?? detailGroup.label} subtitle={detailItem ? `${formatBytes(detailItem.total)} · ${detailItem.subtitle}` : detailGroup.description} width={620}
       footer={detailItem ? <><button className="btn btn-ghost" onClick={() => api.reveal(detailItem.path).catch((e) => useStore.getState().toast({ kind: 'error', title: 'Could not reveal item', detail: errorText(e) }))}><Eye className="w-3.5 h-3.5" /> Finder</button><button className="btn" disabled={!!detailItem.blocked || busy || loading} onClick={() => clean([detailItem], 'quarantine')}>Quarantine…</button><button className="btn btn-primary" disabled={!!detailItem.blocked || busy || loading} onClick={() => clean([detailItem], 'delete')}>Delete permanently…</button></> : <button className="btn" onClick={() => setDetail(null)}>Done</button>}>
       {detailItem && <p className="mono text-[11px] break-all selectable mb-4" style={{ color: 'var(--muted)' }}>{shortPath(detailItem.path, home)}</p>}

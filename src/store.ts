@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from 'react';
 import { create } from 'zustand';
 import type {
   AppInfo,
@@ -17,6 +18,21 @@ import type {
 } from './types';
 import { api, errorText } from './lib/api';
 import { uid } from './lib/format';
+
+/** An item taken out of the disk map so the rest can use its space. */
+export interface HiddenItem {
+  path: string;
+  name: string;
+  kind: string;
+  total: number;
+  /** Remembered across launches; otherwise it reappears next time Disko starts. */
+  persist: boolean;
+}
+
+const HIDDEN_KEY = 'disko.hidden';
+const saveHidden = (items: HiddenItem[]) => {
+  try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(items.filter((i) => i.persist))); } catch {}
+};
 
 export interface Toast {
   id: string;
@@ -48,6 +64,9 @@ interface AppState {
   colorBy: 'folder' | 'policy';
   theme: 'system' | 'light' | 'dark';
   resolvedTheme: 'light' | 'dark';
+
+  /** Items hidden from the disk map. */
+  hiddenItems: HiddenItem[];
 
   // data
   candidates: CandidateItem[];
@@ -88,6 +107,9 @@ interface AppState {
   reloadData: () => Promise<void>;
   setPage: (p: Page) => void;
   setViz: (v: VizMode) => void;
+  hideItem: (it: Omit<HiddenItem, 'persist'>) => void;
+  unhideItems: (paths: string[]) => void;
+  setHiddenPersist: (path: string, persist: boolean) => void;
   navigate: (path: string, opts?: { fromHistory?: boolean }) => Promise<void>;
   navigateUp: () => Promise<void>;
   select: (path: string | null) => void;
@@ -134,7 +156,13 @@ export const useStore = create<AppState>((set, get) => ({
   models: null,
 
   page: 'quick',
-  viz: 'sunburst',
+  viz: (() => { try { return localStorage.getItem('disko.viz') === 'treemap' ? 'treemap' : 'sunburst'; } catch { return 'sunburst'; } })(),
+  hiddenItems: (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]');
+      return Array.isArray(raw) ? raw.filter((i) => typeof i?.path === 'string').map((i) => ({ ...i, persist: true })) : [];
+    } catch { return []; }
+  })(),
   currentPath: '',
   rootPath: '',
   currentItems: [],
@@ -239,7 +267,27 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setPage: (page) => set({ page }),
-  setViz: (viz) => set({ viz }),
+  setViz: (viz) => {
+    try { localStorage.setItem('disko.viz', viz); } catch {}
+    set({ viz });
+  },
+  hideItem: (it) => set((s) => {
+    if (s.hiddenItems.some((h) => h.path === it.path)) return {};
+    // Hiding a folder covers anything already hidden inside it.
+    const hiddenItems = [...s.hiddenItems.filter((h) => !h.path.startsWith(it.path + '/')), { ...it, persist: false }];
+    saveHidden(hiddenItems);
+    return { hiddenItems, hoverPath: null };
+  }),
+  unhideItems: (paths) => set((s) => {
+    const hiddenItems = s.hiddenItems.filter((h) => !paths.includes(h.path));
+    saveHidden(hiddenItems);
+    return { hiddenItems };
+  }),
+  setHiddenPersist: (path, persist) => set((s) => {
+    const hiddenItems = s.hiddenItems.map((h) => (h.path === path ? { ...h, persist } : h));
+    saveHidden(hiddenItems);
+    return { hiddenItems };
+  }),
 
   navigate: async (path, opts?: { fromHistory?: boolean }) => {
     const { currentPath } = get();
@@ -392,3 +440,31 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {}
   },
 }));
+
+/** A path counts as collected when it, or a folder containing it, is in the Collector. */
+class CollectedSet extends Set<string> {
+  has(path: string): boolean {
+    if (super.has(path)) return true;
+    for (const p of this) if (path.startsWith(p + '/')) return true;
+    return false;
+  }
+}
+
+/**
+ * Checkboxes on every page are the Collector: an item is ticked exactly when it is collected,
+ * so there is one selection and one Clean up button for the whole app.
+ * `lookup` turns a ticked path into the item to collect.
+ */
+export function useCollectedSelection(lookup: (path: string) => StagedItem | undefined) {
+  const staged = useStore((s) => s.staged);
+  const selected = useMemo(() => new CollectedSet(staged.map((s) => s.path)), [staged]);
+  const setSelected = useCallback((next: Set<string> | ((old: Set<string>) => Set<string>)) => {
+    const s = useStore.getState();
+    const base = new Set(s.staged.map((i) => i.path));
+    const target = typeof next === 'function' ? next(new CollectedSet(base)) : next;
+    for (const p of base) if (!target.has(p)) s.unstage(p);
+    const added = [...target].filter((p) => !base.has(p)).map(lookup).filter((i): i is StagedItem => !!i);
+    if (added.length) useStore.getState().stageMany(added);
+  }, [lookup]);
+  return [selected, setSelected] as const;
+}

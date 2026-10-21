@@ -11,6 +11,7 @@ import { openItemMenu } from './ContextMenu';
 export const Collector: React.FC = () => {
   const { staged, unstage, clearStaged, setCleanModalOpen, info, trayOpen, setTrayOpen, toggleStage, setAssistantOpen, advanced, toast } = useStore();
   const [over, setOver] = useState(false);
+  const onMap = useStore((s) => s.page === 'explore');
   const total = staged.reduce((a, b) => a + b.total, 0);
   const count = staged.length;
 
@@ -62,7 +63,7 @@ export const Collector: React.FC = () => {
         <AnimatePresence mode="wait" initial={false}>
           {count === 0 ? (
             <motion.span key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-[13px]" style={{ color: 'var(--dim)' }}>
-              Drag and drop files here to collect them
+              {onMap ? 'Drag items here, or right-click → Add to Collector' : 'Tick items to collect them here, then clean up in one go'}
             </motion.span>
           ) : (
             <motion.div key="full" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="flex items-center gap-4">
@@ -82,7 +83,7 @@ export const Collector: React.FC = () => {
             <Sparkles className="w-3.5 h-3.5" /> Ask Disko
           </button>
           <button className="btn btn-primary" onClick={() => { useStore.setState({ cleanupSelection: null }); setCleanModalOpen(true); }}>
-            Clean up {formatBytes(total)}
+            Clean up…
           </button>
         </div>
       )}
@@ -93,12 +94,12 @@ export const Collector: React.FC = () => {
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} className="absolute left-6 bottom-[80px] w-[460px] panel-raised p-2 z-40">
             <div className="max-h-[40vh] overflow-y-auto">
               {staged.map((s) => (
-                <div key={s.path} className="group flex items-center gap-2.5 px-2 h-9 rounded-lg row-hover" onContextMenu={(e) => openItemMenu(e, s)}>
+                <div key={s.path} className="group flex items-center gap-2.5 px-2 h-9 rounded-lg row-hover" title={s.path} onContextMenu={(e) => openItemMenu(e, s)}>
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: catMeta(s.category).color, opacity: advanced ? 1 : 0.5 }} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[12.5px] truncate">{s.name}</div>
                     {s.action && s.action !== 'quarantine' && s.tool ? (
-                      <div className="mono text-[10px] truncate" style={{ color: 'var(--warn)' }} title={`Safer: ${s.tool}`}>safer: {s.tool}</div>
+                      <div className="mono text-[10px] truncate" style={{ color: 'var(--warn)' }} title={`${s.path}\nSafer: ${s.tool}`}>safer: {s.tool}</div>
                     ) : advanced ? (
                       <div className="mono text-[10px] truncate" style={{ color: 'var(--dim)' }}>{shortPath(s.path, info?.home ?? '')}</div>
                     ) : null}
@@ -117,21 +118,33 @@ export const Collector: React.FC = () => {
 };
 
 const MODES = {
-  quarantine: { label: 'Quarantine', icon: Archive, verb: 'Quarantine', doing: 'Moving to quarantine', note: 'Recoverable from Quarantine. Space is freed when you purge.' },
-  delete: { label: 'Delete permanently', icon: Trash2, verb: 'Delete', doing: 'Deleting', note: 'Frees space now. Bypasses Trash and cannot be undone.' },
+  quarantine: { label: 'Quarantine', icon: Archive, doing: 'Moving to quarantine', note: 'Restorable at any time. The space is freed only when you empty the quarantine, which you can do right after.' },
+  delete: { label: 'Delete permanently', icon: Trash2, doing: 'Deleting', note: 'Frees space now. Bypasses Trash and cannot be undone.' },
 } as const;
 
 export const CleanModal: React.FC = () => {
   const { staged: collection, cleanupSelection, cleanModalOpen, setCleanModalOpen, refreshCurrent, reloadData, info, setPage, advanced, cleanupMode: mode, cleanupBusy: busy } = useStore();
   const staged = cleanupSelection ?? collection;
   const hasSimulator = staged.some((s) => s.path.includes('/CoreSimulator/Devices/'));
-  const [result, setResult] = useState<{ paths: string[]; bytes: number; failures: { path: string; error: string }[] } | null>(null);
+  const [result, setResult] = useState<{ paths: string[]; bytes: number; failures: { path: string; error: string }[]; journal?: string } | null>(null);
+  const [freed, setFreed] = useState<number | null>(null);
+  const [freeing, setFreeing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<CleanupProgress | null>(null);
   const [items, setItems] = useState<StagedItem[]>([]);
   const total = staged.reduce((a, b) => a + b.total, 0);
-  useEffect(() => { if (cleanModalOpen) { setResult(null); setError(null); setProgress(null); } }, [cleanModalOpen]);
-  const close = () => { if (!busy) setCleanModalOpen(false); };
+  useEffect(() => { if (cleanModalOpen) { setResult(null); setError(null); setProgress(null); setFreed(null); } }, [cleanModalOpen]);
+  const close = () => { if (!busy && !freeing) setCleanModalOpen(false); };
+  // Quarantine only moves files; this purges the batch just moved so the space actually comes back.
+  const freeNow = async () => {
+    if (!result?.journal || freeing) return;
+    setFreeing(true);
+    try {
+      setFreed(await api.purge(result.journal));
+      await Promise.allSettled([useStore.getState().refreshJournals(), api.volume().then((volume) => useStore.setState((s) => ({ info: s.info ? { ...s.info, volume } : null, overview: s.overview ? { ...s.overview, volume } : null })))]);
+    } catch (e) { setError(errorText(e)); }
+    finally { setFreeing(false); }
+  };
   const m = MODES[mode];
   // Keep the batch on screen while it runs: removing items from the collection must not reshuffle the list.
   const list = busy || result ? items : staged;
@@ -153,7 +166,7 @@ export const CleanModal: React.FC = () => {
         outcome = { paths: res.deleted_items, bytes: res.total_bytes, failures: res.failures };
       } else {
         const res = await api.quarantine(items);
-        outcome = { paths: res.moved_items, bytes: res.total_bytes, failures: res.skipped.map((path) => ({ path, error: 'Item no longer exists or its destination is occupied.' })) };
+        outcome = { paths: res.moved_items, bytes: res.total_bytes, journal: res.journal_path, failures: res.skipped.map((path) => ({ path, error: 'Item no longer exists or its destination is occupied.' })) };
       }
       setResult(outcome);
       useStore.setState((s) => ({ staged: s.staged.filter((i) => !outcome.paths.includes(i.path)) }));
@@ -168,29 +181,32 @@ export const CleanModal: React.FC = () => {
   const simulatorNote = mode === 'delete' ? 'Simulator apps and their data are lost; shared OS runtimes remain installed.' : 'Keep Xcode, Simulator and agents closed until you restore or purge. Restoring cannot replace a device recreated at the same path.';
   const current = progress ? list[Math.min(progress.index, list.length - 1)] : undefined;
   return (
-    <Modal open={cleanModalOpen} onClose={close} locked={busy} width={520}
-      title={result ? (result.failures.length ? 'Cleanup finished with problems' : mode === 'delete' ? 'Deleted' : 'Moved to quarantine')
-        : busy ? `${m.doing}…` : `Clean up ${formatBytes(total)}`}
+    <Modal open={cleanModalOpen} onClose={close} locked={busy || freeing} width={520}
+      title={result ? (result.failures.length ? 'Cleanup finished with problems' : mode === 'delete' || freed != null ? 'Space freed' : 'Moved to quarantine')
+        : busy ? `${m.doing}…` : mode === 'delete' ? `Delete ${formatBytes(total)} permanently` : `Move ${formatBytes(total)} to quarantine`}
       subtitle={result ? `${result.paths.length} of ${list.length} item${list.length === 1 ? '' : 's'} ${mode === 'delete' ? 'deleted' : 'moved'}`
         : busy ? (finishing ? 'Finishing up…' : progress && current ? `${Math.min(progress.index + 1, progress.count)} of ${progress.count} · ${current.name}` : 'Starting…')
         : `${staged.length} item${staged.length === 1 ? '' : 's'}`}
-      footer={result ? <>
-        {mode === 'quarantine' && <button className="btn" onClick={() => { close(); setPage('quarantine'); }}>Open quarantine</button>}
-        <button className="btn btn-primary" onClick={close}>Done</button>
-      </> : busy ? (
+      footer={result ? (mode === 'quarantine' && result.journal && result.bytes > 0 && freed == null ? <>
+        <button className="btn btn-ghost mr-auto" disabled={freeing} onClick={() => { close(); setPage('quarantine'); }}>Open quarantine</button>
+        <button className="btn" disabled={freeing} onClick={close}>Keep for now</button>
+        <button className="btn btn-primary" disabled={freeing} onClick={freeNow}>{freeing ? 'Freeing…' : `Free ${formatBytes(result.bytes)} now`}</button>
+      </> : <button className="btn btn-primary" onClick={close}>Done</button>) : busy ? (
         <span className="mr-auto text-[12px]" style={{ color: 'var(--muted)' }}>Keep Disko open until this finishes.</span>
       ) : <>
         <button className="btn btn-ghost" onClick={close}>Cancel</button>
         <button className="btn btn-primary" style={mode === 'delete' ? { background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' } : undefined} onClick={run} disabled={staged.length === 0}>
-          {m.verb} {formatBytes(total)}
+          {mode === 'delete' ? `Delete ${formatBytes(total)}` : `Move ${formatBytes(total)} to quarantine`}
         </button>
       </>}>
       {result ? <div>
         <div className="flex items-baseline gap-2">
-          <span className="tnum text-[32px] font-medium">{formatBytes(result.bytes)}</span>
-          <span className="text-[13px]" style={{ color: 'var(--muted)' }}>{mode === 'delete' ? 'freed' : 'quarantined'}</span>
+          <span className="tnum text-[32px] font-medium">{formatBytes(freed ?? result.bytes)}</span>
+          <span className="text-[13px]" style={{ color: 'var(--muted)' }}>{mode === 'delete' || freed != null ? 'freed' : 'in quarantine, not freed yet'}</span>
         </div>
-        <p className="text-[12px] mt-1" style={{ color: 'var(--muted)' }}>{mode === 'delete' ? 'Free space may differ slightly because of APFS snapshots and shared blocks.' : 'Restore from Quarantine, or purge there to free the space.'}</p>
+        <p className="text-[12px] mt-1" style={{ color: 'var(--muted)' }}>{mode === 'delete' || freed != null
+          ? 'Free space may differ slightly because of APFS snapshots and shared blocks.'
+          : 'Everything is restorable from Quarantine. The space comes back only when you free it, now or later from Quarantine.'}</p>
         {hasSimulator && <p className="text-[12px] mt-2" style={{ color: 'var(--warn)' }}>{simulatorNote}</p>}
         {result.failures.map((f) => <p key={f.path} className="text-[12px] mt-3 break-all selectable" style={{ color: 'var(--warn)' }}>{shortPath(f.path, info?.home ?? '')}: {f.error}</p>)}
       </div> : <div>

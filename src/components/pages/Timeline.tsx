@@ -58,7 +58,7 @@ export const TimelinePage: React.FC = () => {
   const [refresh, setRefresh] = useState(0);
   const [threshold, setThreshold] = useState<string>('365');
   const [lane, setLane] = useState<TimelineLane | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const staged = useStore((s) => s.staged);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [focus, setFocus] = useState<string | null>(null);
 
@@ -100,12 +100,15 @@ export const TimelinePage: React.FC = () => {
   ].filter((b) => b.items.length);
 
   const byKey = useMemo(() => new Map(entries.map((e) => [e.key, e])), [entries]);
-  const chosen = [...selected].map((k) => byKey.get(k)).filter((e): e is Entry => !!e && e.staged.length > 0);
-  const chosenBytes = chosen.reduce((n, e) => n + e.staged.reduce((m, s) => m + s.total, 0), 0);
-  const toggle = (k: string) => setSelected((old) => { const n = new Set(old); n.has(k) ? n.delete(k) : n.add(k); return n; });
-  const clean = () => {
-    if (!chosen.length || useStore.getState().cleanupBusy) return;
-    useStore.setState({ cleanupSelection: chosen.flatMap((e) => e.staged), cleanupMode: 'quarantine', cleanModalOpen: true });
+  // A row is ticked when everything it would clean is in the Collector.
+  const covered = (p: string) => staged.some((s) => s.path === p || p.startsWith(s.path + '/'));
+  const isChosen = (e: Entry) => e.staged.length > 0 && e.staged.every((s) => covered(s.path));
+  const toggle = (k: string) => {
+    const e = byKey.get(k);
+    if (!e) return;
+    const st = useStore.getState();
+    if (isChosen(e)) e.staged.forEach((s) => st.unstage(s.path));
+    else st.stageMany(e.staged);
   };
   const reveal = (e: Entry) => {
     const target = byKey.get(e.key);
@@ -167,7 +170,7 @@ export const TimelinePage: React.FC = () => {
                     const command = !canClean && e.tool && e.action === 'manager_command';
                     return (
                       <label key={e.key} id={`tl-${e.key}`} className="junk-row group" aria-disabled={!canClean} data-focus={focus === e.key || undefined}>
-                        <input type="checkbox" disabled={!canClean || busy} checked={selected.has(e.key)} onChange={() => toggle(e.key)} aria-label={`Select ${e.name}`} />
+                        <input type="checkbox" disabled={!canClean || busy} checked={isChosen(e)} onChange={() => toggle(e.key)} aria-label={`Select ${e.name}`} />
                         <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: laneColor(e.lane) }} />
                         <span className="flex-1 min-w-0">
                           <span className="flex items-center gap-2 min-w-0">
@@ -202,13 +205,6 @@ export const TimelinePage: React.FC = () => {
           </p>
         </div>
 
-        {chosen.length > 0 && (
-          <div className="action-bar">
-            <span className="text-[12.5px] flex-1" style={{ color: 'var(--muted)' }}><strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(chosenBytes)}</strong> selected from {chosen.length} {chosen.length === 1 ? 'item' : 'items'}</span>
-            <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(new Set())}>Clear</button>
-            <button className="btn btn-primary" disabled={busy} onClick={clean}>Clean up…</button>
-          </div>
-        )}
       </div>
     </div>
   );

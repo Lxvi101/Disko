@@ -14,7 +14,7 @@ const SECTIONS: { title?: string; items: Entry[] }[] = [
     items: [
       { id: 'junk', label: 'Junk', icon: Trash2, hint: 'Everything rebuildable from your scan' },
       { id: 'apps', label: 'Apps', icon: LayoutGrid, hint: 'Space hiding inside apps' },
-      { id: 'suggestions', label: 'Leftovers', icon: Search, hint: 'Uninstalled apps, duplicates, AI picks' },
+      { id: 'suggestions', label: 'Suggestions', icon: Search, hint: 'AI picks, duplicates, leftovers of removed apps' },
     ],
   },
   {
@@ -97,12 +97,12 @@ export const Sidebar: React.FC<{ onScan: () => void; scanning: boolean; pinned: 
       </div>
 
       <div className="dock-foot">
-        <button className="dock-disk" onClick={onScan} disabled={scanning} aria-pressed={startScreen} title={scanning ? 'Scanning…' : 'Disk scan'}>
+        <button className="dock-disk" onClick={onScan} disabled={scanning} aria-pressed={startScreen} title={scanning ? 'Scanning…' : 'Scan your disk again to refresh the map and every list'}>
           <DiskRing used={vol?.total ? 1 - vol.available / vol.total : 0} spinning={scanning} />
           <span className="dock-label flex-col !items-start">
             <span className="text-[12.5px] font-semibold tnum">{vol?.total ? `${formatBytes(vol.available)} free` : 'Disk'}</span>
             <span className="text-[10.5px] font-normal flex items-center gap-1" style={{ color: 'var(--dim)' }}>
-              {scanning ? <><RefreshCw className="w-2.5 h-2.5 animate-spin" /> Scanning…</> : <><ScanSearch className="w-2.5 h-2.5" /> Disk scan · {scan?.finished ? relativeTime(scan.finished) : 'never'}</>}
+              {scanning ? <><RefreshCw className="w-2.5 h-2.5 animate-spin" /> Scanning…</> : <><ScanSearch className="w-2.5 h-2.5" /> {scan?.finished ? `Scan again · ${relativeTime(scan.finished)}` : 'Scan your disk'}</>}
             </span>
           </span>
         </button>
@@ -120,7 +120,7 @@ function DiskRing({ used, spinning }: { used: number; spinning: boolean }) {
         <motion.circle cx="19" cy="19" r={r} fill="none" stroke={used > 0.9 ? 'var(--danger)' : 'var(--text)'} strokeWidth="2.5" strokeLinecap="round" strokeDasharray={c}
           initial={false} animate={{ strokeDashoffset: c * (1 - used) }} transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }} />
       </svg>
-      <span className="dock-ring-label tnum">{spinning ? <RefreshCw className="w-3 h-3 animate-spin" /> : `${Math.round(used * 100)}`}</span>
+      <span className="dock-ring-label tnum">{spinning ? <RefreshCw className="w-3 h-3 animate-spin" /> : `${Math.round(used * 100)}%`}</span>
     </span>
   );
 }

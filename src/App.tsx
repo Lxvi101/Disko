@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Search, Bot, Sun, Moon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Bot, Sun, Moon, PieChart, LayoutDashboard, RefreshCw } from 'lucide-react';
 import { useStore } from './store';
 import { Assistant } from './components/Assistant';
 import { Collector, CleanModal } from './components/Collector';
@@ -18,8 +18,8 @@ import { QuickCleanPage } from './components/pages/QuickClean';
 import { Sidebar, RAIL, RAIL_OPEN } from './components/Sidebar';
 import { ScanScreen } from './components/ScanScreen';
 import { useScan } from './hooks/useScan';
-import { Switch } from './components/ui';
-import { formatNumber } from './lib/format';
+import { Switch, SegmentedControl } from './components/ui';
+import { formatNumber, relativeTime } from './lib/format';
 import type { Page } from './types';
 
 const PAGES: Record<Page, React.FC> = {
@@ -165,6 +165,25 @@ export const App: React.FC = () => {
               </span>
             )}
             {onMap && s.coverageIssues > 0 && <span className="tnum text-[11.5px] mr-2" style={{ color: 'var(--dim)' }} title="Folders macOS did not let Disko read. Grant Full Disk Access and rescan to include them.">{formatNumber(s.coverageIssues)} unreadable</span>}
+            {onMap && info?.scan?.finished && (
+              // The map is a snapshot; say how old it is and make rescanning one click away.
+              <button className="btn btn-ghost btn-sm mr-1" onClick={() => setStartScreen(true)} title="The map shows your last scan. Scan again to see what changed since."
+                style={{ color: Date.now() / 1000 - info.scan.finished > 3 * 86400 ? 'var(--warn)' : 'var(--muted)' }}>
+                <RefreshCw className="w-3 h-3" /> Scanned {relativeTime(info.scan.finished)}
+              </button>
+            )}
+            {onMap && (
+              <span className="mr-2">
+                <SegmentedControl
+                  value={s.viz === 'treemap' ? 'treemap' : 'sunburst'}
+                  onChange={s.setViz}
+                  options={[
+                    { value: 'sunburst', label: <PieChart className="w-3.5 h-3.5" />, title: 'Ring view' },
+                    { value: 'treemap', label: <LayoutDashboard className="w-3.5 h-3.5" />, title: 'Block view' },
+                  ]}
+                />
+              </span>
+            )}
             {onMap && <span className="mr-1"><Switch on={advanced} onChange={setAdvanced} label="Details" /></span>}
             <button className="btn btn-ghost btn-icon" onClick={() => setTheme(resolvedTheme === 'light' ? 'dark' : 'light')} title={theme === 'system' ? 'Appearance: follows system' : `Appearance: ${theme}`}>
               {resolvedTheme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}

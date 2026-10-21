@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Sparkles, Plus, Check, Eye, ChevronDown, ChevronLeft, ChevronRight, Copy, Copy as Dup, FolderOpen, Ghost, RefreshCw, Square, Terminal } from 'lucide-react';
-import { useStore } from '../../store';
+import { useStore, useCollectedSelection } from '../../store';
 import { api, errorText, onCodexEvent } from '../../lib/api';
 import { formatBytes, shortPath, formatDate, uid } from '../../lib/format';
 import { Empty, SegmentedControl, Spinner } from '../ui';
@@ -42,11 +42,6 @@ export function memberToStaged(g: RemnantGroup, m: RemnantMember): StagedItem {
     action: 'quarantine',
     source: 'remnant',
   };
-}
-
-function openClean(items: StagedItem[]) {
-  if (!items.length || useStore.getState().cleanupBusy) return;
-  useStore.setState({ cleanupSelection: items, cleanupMode: 'quarantine', cleanModalOpen: true });
 }
 
 const nameOf = (p: string) => p.split('/').filter(Boolean).pop() ?? p;
@@ -95,7 +90,11 @@ function AiPicks() {
   const [running, setRunning] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const pickLookup = useCallback((p: string): StagedItem | undefined => {
+    const s = result?.suggestions.find((x) => x.path === p && x.action !== 'command');
+    return s && { path: s.path, name: nameOf(s.path), kind: 'directory', total: s.bytes ?? 0, category: 'review', reason: s.reason, source: 'assistant' };
+  }, [result]);
+  const [selected, setSelected] = useCollectedSelection(pickLookup);
   const req = useRef<string | null>(null);
 
   useEffect(() => {
@@ -122,7 +121,6 @@ function AiPicks() {
       aiCache = next;
       try { localStorage.setItem('disko.aiPicks', JSON.stringify(next)); } catch {}
       setResult(next);
-      setSelected(new Set());
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -159,7 +157,6 @@ function AiPicks() {
   }
 
   const picks = result.suggestions;
-  const chosen = picks.filter((s) => selected.has(s.path) && s.action !== 'command');
   return (
     <div>
       <div className="flex items-start gap-3">
@@ -194,13 +191,6 @@ function AiPicks() {
         })}
         {!picks.length && <p className="py-10 text-center text-[12.5px]" style={{ color: 'var(--dim)' }}>No specific picks this time.</p>}
       </div>
-      {chosen.length > 0 && (
-        <div className="action-bar">
-          <span className="text-[12.5px] flex-1" style={{ color: 'var(--muted)' }}><strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(chosen.reduce((n, s) => n + (s.bytes ?? 0), 0))}</strong> selected from {chosen.length}</span>
-          <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(new Set())}>Clear</button>
-          <button className="btn btn-primary" disabled={busy} onClick={() => openClean(chosen.map((s) => ({ path: s.path, name: nameOf(s.path), kind: 'directory', total: s.bytes ?? 0, category: 'review', reason: s.reason, source: 'assistant' })))}>Clean up…</button>
-        </div>
-      )}
     </div>
   );
 }
@@ -215,18 +205,21 @@ function Duplicates() {
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [page, setPage] = useState(0);
-  // Every copy except the oldest starts selected; the oldest is most likely the original.
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const dupLookup = useCallback((p: string): StagedItem | undefined => {
+    const g = groups?.find((x) => x.files.some((f) => f.path === p));
+    const f = g?.files.find((x) => x.path === p);
+    return g && f && { path: f.path, name: f.name, kind: 'file', total: g.allocated, category: 'review', reason: `Identical copy of a file kept elsewhere (${g.files.length} copies).`, tag: 'user-files', action: 'quarantine', source: 'suggestion' };
+  }, [groups]);
+  const [selected, setSelected] = useCollectedSelection(dupLookup);
 
   useEffect(() => {
-    if (dupCache?.key === key && !refresh) { setSelected(new Set(dupCache.groups.flatMap((g) => g.files.slice(1).map((f) => f.path)))); return; }
+    if (dupCache?.key === key && !refresh) return;
     let live = true;
     setGroups(null); setError(null);
     api.duplicates().then((g) => {
       if (!live) return;
       dupCache = { key, groups: g };
       setGroups(g);
-      setSelected(new Set(g.flatMap((x) => x.files.slice(1).map((f) => f.path))));
     }).catch((e) => live && setError(errorText(e)));
     return () => { live = false; };
   }, [key, refresh]);
@@ -239,8 +232,9 @@ function Duplicates() {
   const pages = Math.ceil(groups.length / DUP_PAGE);
   const current = Math.min(page, pages - 1);
   const shown = groups.slice(current * DUP_PAGE, current * DUP_PAGE + DUP_PAGE);
-  const chosen = groups.flatMap((g) => g.files.filter((f) => selected.has(f.path)).map((f) => ({ g, f })));
-  const chosenBytes = chosen.reduce((n, c) => n + c.g.allocated, 0);
+  // Every copy except the oldest; the oldest is most likely the original.
+  const extras = groups.flatMap((g) => g.files.slice(1).map((f) => f.path));
+  const allExtras = extras.length > 0 && extras.every((p) => selected.has(p));
   const toggle = (g: DupGroup, path: string) => setSelected((old) => {
     const next = new Set(old);
     if (next.has(path)) next.delete(path);
@@ -254,6 +248,9 @@ function Duplicates() {
       <p className="text-[13px]" style={{ color: 'var(--muted)' }}>
         <strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(wasted)}</strong> in {groups.length} sets of identical files. The oldest copy of each is kept.
         <button className="btn btn-ghost btn-sm ml-2" onClick={() => setRefresh((n) => n + 1)}><RefreshCw className="w-3 h-3" /> Compare again</button>
+        <button className="btn btn-sm ml-1" disabled={busy} onClick={() => setSelected((old) => { const next = new Set(old); extras.forEach((p) => (allExtras ? next.delete(p) : next.add(p))); return next; })}>
+          {allExtras ? 'Deselect all copies' : 'Collect every extra copy'}
+        </button>
       </p>
       <div className="mt-4 space-y-3">
         {shown.map((g) => (
@@ -270,7 +267,7 @@ function Duplicates() {
                   <span className="flex-1 min-w-0">
                     <span className="block text-[12.5px] truncate selectable" title={f.path}>{shortPath(f.path.slice(0, f.path.length - f.name.length - 1), home)}</span>
                   </span>
-                  {!on && <span className="junk-kind">Keep</span>}
+                  {!on && g.files.some((x) => selected.has(x.path)) && <span className="junk-kind">Keep</span>}
                   <span className="text-[11.5px] w-[76px] text-right flex-shrink-0" style={{ color: 'var(--dim)' }} title={f.mtime ? `Modified ${formatDate(f.mtime)}` : undefined}>{age(f.mtime)}</span>
                   <button className="btn btn-ghost btn-icon !p-1 opacity-0 group-hover:opacity-100 transition-opacity" title="Show in Finder" onClick={(e) => { e.preventDefault(); api.reveal(f.path).catch(() => {}); }}><FolderOpen className="w-3.5 h-3.5" /></button>
                 </label>
@@ -290,13 +287,6 @@ function Duplicates() {
         </nav>
       )}
       <p className="text-[11px] mt-4" style={{ color: 'var(--dim)' }}>Copies made with Finder’s Duplicate can share storage on APFS, so removing them may free less than shown.</p>
-      {chosen.length > 0 && (
-        <div className="action-bar">
-          <span className="text-[12.5px] flex-1" style={{ color: 'var(--muted)' }}><strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(chosenBytes)}</strong> in {chosen.length} extra {chosen.length === 1 ? 'copy' : 'copies'}</span>
-          <button className="btn btn-ghost" disabled={busy} onClick={() => setSelected(new Set())}>Clear</button>
-          <button className="btn btn-primary" disabled={busy} onClick={() => openClean(chosen.map(({ g, f }) => ({ path: f.path, name: f.name, kind: 'file', total: g.allocated, category: 'review', reason: `Identical copy of a file kept elsewhere (${g.files.length} copies).`, tag: 'user-files', action: 'quarantine', source: 'suggestion' })))}>Remove copies…</button>
-        </div>
-      )}
     </div>
   );
 }

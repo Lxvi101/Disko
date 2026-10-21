@@ -9,7 +9,7 @@ import type { StagedItem } from '../types';
 export interface MenuItem {
   label: string;
   hint?: string;
-  shortcut?: 'preview' | 'collect';
+  shortcut?: 'preview' | 'collect' | 'hide';
   danger?: boolean;
   disabled?: boolean;
   title?: string;
@@ -118,6 +118,17 @@ export function flyToCollector(x: number, y: number, color?: string) {
   };
 }
 
+/** Take an item out of the disk map; the first time, say where to find it again. */
+export const hideFromMap = (it: Pick<MenuTarget, 'path' | 'name' | 'kind' | 'total'>) => {
+  const s = useStore.getState();
+  s.hideItem({ path: it.path, name: it.name || it.path.split('/').pop() || it.path, kind: it.kind, total: it.total });
+  try {
+    if (localStorage.getItem('disko.hideHint')) return;
+    localStorage.setItem('disko.hideHint', '1');
+  } catch { return; }
+  s.toast({ kind: 'info', title: 'Hidden from the map', detail: 'Bring it back from “hidden” below the map. Pin it there to keep it hidden next time.' });
+};
+
 /** Compact Finder-style menu shared by the disk map and its folder list. */
 export const openExploreMenu = (e: React.MouseEvent | MouseEvent, it: MenuTarget, color?: string) => {
   const s = useStore.getState();
@@ -128,21 +139,24 @@ export const openExploreMenu = (e: React.MouseEvent | MouseEvent, it: MenuTarget
     void action().catch((err) => s.toast({ kind: 'error', title, detail: String(err) }));
   };
   openMenu(e, [
-    it.kind === 'directory'
-      ? { label: `Expand “${name}”`, onSelect: () => { void s.navigate(it.path); } }
-      : { label: `Open “${name}”`, onSelect: run(() => api.open(it.path), 'Could not open') },
-    { label: 'Preview', hint: 'Space', shortcut: 'preview', onSelect: run(() => api.preview(it.path), 'Could not preview') },
-    { label: 'Show in Finder', onSelect: run(() => api.reveal(it.path), 'Could not show in Finder') },
-    { label: 'Open in Terminal', onSelect: run(() => api.openTerminal(it.path), 'Could not open Terminal') },
-    ...cleanupEntries(it),
     {
-      label: staged ? `Remove “${name}” from Collector` : `Move “${name}” to Collector`,
+      label: staged ? 'Remove from Collector' : 'Add to Collector',
       hint: '⌘⌫',
       shortcut: 'collect',
       disabled: it.category === 'protected' && !staged,
       title: it.category === 'protected' ? it.reason || 'Protected: system, credential or cloud-managed path.' : undefined,
       onSelect: () => collectFromPointer(origin, it, color),
     },
+    'sep',
+    it.kind === 'directory'
+      ? { label: `Expand “${name}”`, onSelect: () => { void s.navigate(it.path); } }
+      : { label: `Open “${name}”`, onSelect: run(() => api.open(it.path), 'Could not open') },
+    { label: 'Preview', hint: 'Space', shortcut: 'preview', onSelect: run(() => api.preview(it.path), 'Could not preview') },
+    { label: 'Show in Finder', onSelect: run(() => api.reveal(it.path), 'Could not show in Finder') },
+    { label: 'Open in Terminal', onSelect: run(() => api.openTerminal(it.path), 'Could not open Terminal') },
+    { label: 'Hide from Map', hint: 'H', shortcut: 'hide', onSelect: () => hideFromMap(it) },
+    'sep',
+    ...cleanupEntries(it),
   ]);
 };
 
@@ -156,14 +170,14 @@ export const openItemMenu = (e: React.MouseEvent | MouseEvent, it: MenuTarget) =
   const inScan = s.page === 'explore' || s.page === 'junk' ? true : it.path.startsWith(s.rootPath);
 
   const entries: MenuEntry[] = [
-    ...cleanupEntries(it),
     {
-      label: staged ? 'Remove from collection' : 'Collect for cleanup',
+      label: staged ? 'Remove from Collector' : 'Add to Collector',
       hint: staged ? undefined : formatBytes(it.total),
       disabled: protectedItem && !staged,
       title: protectedItem ? it.reason || 'Protected: system, credential or cloud-managed path.' : undefined,
       onSelect: () => (staged ? s.unstage(it.path) : s.toggleStage({ ...it, name, source: it.source ?? 'explore' })),
     },
+    ...cleanupEntries(it),
     'sep',
     ...(isDir && inScan
       ? [{ label: 'Open in Disko', onSelect: () => { s.setPage('explore'); s.navigate(it.path); } } as MenuItem]
@@ -215,7 +229,8 @@ export const ContextMenuHost: React.FC = () => {
     };
     const key = (e: KeyboardEvent) => {
       const shortcut = e.key === ' ' && !e.metaKey && !e.ctrlKey && !e.altKey ? 'preview'
-        : (e.metaKey || e.ctrlKey) && e.key === 'Backspace' ? 'collect' : null;
+        : (e.metaKey || e.ctrlKey) && e.key === 'Backspace' ? 'collect'
+        : e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey && !e.altKey ? 'hide' : null;
       const action = entries.find((entry): entry is MenuItem => entry !== 'sep' && entry.shortcut === shortcut && !entry.disabled);
       if (shortcut && entries.some((entry) => entry !== 'sep' && entry.shortcut === shortcut)) {
         e.preventDefault();
