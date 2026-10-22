@@ -89,6 +89,10 @@ export interface Datum {
   reason: string;
   isRest?: boolean;
   isHidden?: boolean;
+  /** For the remainder: how many items it stands for. */
+  count?: number;
+  /** Folder a click opens when single-child folders were folded into this one. */
+  target?: string;
   children?: Datum[];
 }
 export type ArcNode = HierarchyRectangularNode<Datum> & { hue: number };
@@ -104,7 +108,7 @@ export function toDatum(n: TreeNode): Datum {
   const children = n.children.map(toDatum);
   if (n.rest_total > 0) children.push({
     name: 'smaller objects…', path: `${n.path.replace(/\/$/, '')}/…`, kind: 'rest',
-    total: n.rest_total, category: 'other', reason: 'Items too small to draw individually.', isRest: true,
+    total: n.rest_total, category: 'other', reason: 'Items too small to draw individually.', isRest: true, count: n.rest_count,
   });
   return { ...n, total: Math.max(n.total, children.reduce((sum, c) => sum + c.total, 0)), children };
 }

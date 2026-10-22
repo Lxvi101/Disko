@@ -156,7 +156,7 @@ export const useStore = create<AppState>((set, get) => ({
   models: null,
 
   page: 'quick',
-  viz: (() => { try { return localStorage.getItem('disko.viz') === 'treemap' ? 'treemap' : 'sunburst'; } catch { return 'sunburst'; } })(),
+  viz: (() => { try { const v = localStorage.getItem('disko.viz'); return v === 'treemap' || v === 'timeline' ? v : 'sunburst'; } catch { return 'sunburst'; } })(),
   hiddenItems: (() => {
     try {
       const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]');

@@ -6,6 +6,8 @@
   "permissions": [
     "core:default",
     "core:window:allow-set-background-color",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "dialog:default",
     "updater:default",
     "process:allow-restart"

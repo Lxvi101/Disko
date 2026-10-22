@@ -10,6 +10,7 @@ import { GREY } from '../../lib/colors';
 import type { FileItem, TreeNode } from '../../types';
 import { Sunburst } from '../viz/Sunburst';
 import { Treemap } from '../viz/Treemap';
+import { FolderTimeline } from '../viz/FolderTimeline';
 import { openExploreMenu, hideFromMap } from '../ContextMenu';
 
 export const ExplorePage: React.FC = () => {
@@ -24,6 +25,7 @@ export const ExplorePage: React.FC = () => {
   const tree = pruned?.tree ?? null;
   const removed = pruned?.removed ?? 0;
   const hiddenHere = useMemo(() => hiddenItems.filter((h) => isInside(h.path, currentPath)), [hiddenItems, currentPath]);
+  const hiddenHerePaths = useMemo(() => hiddenHere.map((h) => h.path), [hiddenHere]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [colors, setColors] = useState<Map<string, string>>(new Map());
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -135,8 +137,23 @@ export const ExplorePage: React.FC = () => {
 
   return (
     <div className={`h-full flex min-h-0 ${advanced ? '' : 'standard-explore'}`} onMouseLeave={() => { setPreviewPath(null); setHover(null); }}>
-      <div className={`explore-wheel relative flex-1 min-w-0 min-h-0 p-6 pr-2 ${viz === 'treemap' ? 'blocks-view' : ''}`}>
-        {viz === 'treemap' ? (
+      <div className={`explore-wheel relative flex-1 min-w-0 min-h-0 p-6 pr-2 ${viz === 'treemap' ? 'blocks-view' : viz === 'timeline' ? 'timeline-view' : ''}`}>
+        {viz === 'timeline' ? (
+          <FolderTimeline
+            path={currentPath}
+            tree={tree}
+            hidden={hiddenHerePaths}
+            hoverPath={hoverPath}
+            stagedPaths={stagedPaths}
+            onHover={onChartHover}
+            onNavigate={navigate}
+            onRemainder={path => {
+              if (!advanced) setExpandedRemainder(path);
+            }}
+            onLayout={onLayout}
+            onContextMenu={(d, e) => openExploreMenu(e, d, colors.get(d.path))}
+          />
+        ) : viz === 'treemap' ? (
           <Treemap
             datum={blocks}
             path={tree?.path ?? null}

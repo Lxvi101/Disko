@@ -45,6 +45,26 @@ export interface TreeNode {
   rest_count: number;
 }
 
+/** One child of a folder, its bytes binned by when they last changed (see `get_folder_timeline`). */
+export interface TimelineChild {
+  path: string;
+  name: string;
+  kind: string;
+  total: number;
+  category: string;
+  reason: string;
+  newest: number | null;
+  bytes: number[];
+}
+
+export interface FolderTimeline {
+  path: string;
+  children: TimelineChild[];
+  rest: number[];
+  rest_count: number;
+  undated: number;
+}
+
 export interface ScanMeta {
   root: string;
   started?: number | null;
@@ -318,7 +338,7 @@ export interface ScanInfo {
 }
 
 export type Page = 'quick' | 'apps' | 'explore' | 'junk' | 'suggestions' | 'timeline' | 'quarantine';
-export type VizMode = 'sunburst' | 'treemap' | 'list';
+export type VizMode = 'sunburst' | 'treemap' | 'timeline' | 'list';
 
 export interface XcodeItem {
   path: string; name: string; group: string; total: number;

@@ -779,6 +779,91 @@ fn get_subtree_sync(path: String, depth: Option<usize>) -> Result<TreeNode, Stri
     Ok(build_tree(&conn, &item, depth, &limits, min_total.max(1)))
 }
 
+/// One child of a folder on the folder timeline: its bytes binned by when they last changed.
+#[derive(Debug, Serialize, Clone)]
+pub struct TimelineChild {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    pub total: u64,
+    pub category: String,
+    pub reason: String,
+    /// Newest modification inside, seconds since the epoch.
+    pub newest: Option<i64>,
+    /// Bytes per period; `bytes[i]` covers `[edges[i-1], edges[i])`, the ends are open.
+    pub bytes: Vec<u64>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct FolderTimeline {
+    pub path: String,
+    pub children: Vec<TimelineChild>,
+    /// Children too small to list, binned the same way.
+    pub rest: Vec<u64>,
+    pub rest_count: u64,
+    /// Bytes with no modification date.
+    pub undated: u64,
+}
+
+/// Bin every file below `path` by modification time, per child of `path`. Folders count by what
+/// they hold, so a project touched last week lands in last week even if most of it is older.
+fn folder_timeline(conn: &Connection, path: String, edges: Vec<i64>, hidden: Vec<String>) -> Result<FolderTimeline, String> {
+    let id = id_for_path(conn, &path).ok_or("Path not found in scan")?;
+    let hidden: Vec<String> = hidden.into_iter().filter(|h| h != &path).collect();
+    let is_hidden = |p: &str| hidden.iter().any(|h| p == h || (p.starts_with(h.as_str()) && p.as_bytes().get(h.len()) == Some(&b'/')));
+    const SHOWN: usize = 40;
+    let bins = edges.len() + 1;
+    let bin = |secs: i64| edges.partition_point(|e| *e <= secs);
+
+    let mut children: Vec<TimelineChild> = Vec::new();
+    let mut slot: HashMap<String, usize> = HashMap::new();
+    let mut rest_count = 0u64;
+    for c in children_of(conn, id, usize::MAX >> 1)? {
+        if c.total == 0 || is_hidden(&c.path) {
+            continue;
+        }
+        if children.len() < SHOWN {
+            slot.insert(c.name.clone(), children.len());
+            children.push(TimelineChild { path: c.path, name: c.name, kind: c.kind, total: c.total, category: c.category, reason: c.reason, newest: None, bytes: vec![0; bins] });
+        } else {
+            rest_count += 1;
+        }
+    }
+
+    let prefix = if path == "/" { String::from("/") } else { format!("{}/", path.trim_end_matches('/')) };
+    // `prefix` .. `prefix` with its final '/' bumped to '0' is exactly the subtree, on the path index.
+    let upper = format!("{}0", &prefix[..prefix.len() - 1]);
+    let mut stmt = conn
+        .prepare("SELECT path, total, mtime_ns FROM entries WHERE path > ?1 AND path < ?2 AND kind != 'directory' AND total > 0")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![prefix, upper], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Option<i64>>(2)?)))
+        .map_err(|e| e.to_string())?;
+    let mut rest = vec![0u64; bins];
+    let mut undated = 0u64;
+    for (p, total, mtime) in rows.flatten() {
+        if !hidden.is_empty() && is_hidden(&p) {
+            continue;
+        }
+        let total = total.max(0) as u64;
+        let secs = mtime.filter(|t| *t > 0).map(|t| t / 1_000_000_000);
+        let Some(secs) = secs else {
+            undated += total;
+            continue;
+        };
+        let head = p[prefix.len()..].split('/').next().unwrap_or("");
+        match slot.get(head) {
+            Some(&i) => {
+                let c = &mut children[i];
+                c.bytes[bin(secs)] += total;
+                c.newest = Some(c.newest.map_or(secs, |n| n.max(secs)));
+            }
+            None => rest[bin(secs)] += total,
+        }
+    }
+    Ok(FolderTimeline { path, children, rest, rest_count, undated })
+}
+
 fn get_path_info_sync(path: String) -> Result<Option<FileItem>, String> {
     let Some(conn) = open_db() else { return Ok(None) };
     let mut item = item_for_path(&conn, &path);
@@ -2384,6 +2469,16 @@ async fn get_subtree(path: String, depth: Option<usize>) -> Result<TreeNode, Str
 }
 
 #[tauri::command]
+async fn get_folder_timeline(path: String, edges: Vec<i64>, hidden: Option<Vec<String>>) -> Result<FolderTimeline, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db().ok_or("No scan database loaded")?;
+        folder_timeline(&conn, path, edges, hidden.unwrap_or_default())
+    })
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn get_path_info(path: String) -> Result<Option<FileItem>, String> {
     tauri::async_runtime::spawn_blocking(move || get_path_info_sync(path))
         .await
@@ -2597,6 +2692,7 @@ pub fn run() {
             load_disk_overview,
             query_folder_children,
             get_subtree,
+            get_folder_timeline,
             get_path_info,
             search_entries,
             get_largest_files,
@@ -2639,6 +2735,40 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Disko");
+}
+
+#[cfg(test)]
+mod folder_timeline_tests {
+    use super::*;
+
+    /// Files are binned under the child that holds them; hidden items and undated files stay out.
+    #[test]
+    fn bins_files_by_child_and_age() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE entries(id INTEGER PRIMARY KEY, parent INTEGER, path TEXT UNIQUE, kind TEXT, total INTEGER,
+               allocated INTEGER, logical INTEGER, category TEXT, reason TEXT, mtime_ns INTEGER, error TEXT);
+             INSERT INTO entries(id, parent, path, kind, total, mtime_ns) VALUES
+               (1, NULL, '/w', 'directory', 100, 0),
+               (2, 1, '/w/a', 'directory', 60, 0),
+               (3, 2, '/w/a/old.bin', 'file', 40, 100000000000),
+               (4, 2, '/w/a/new.bin', 'file', 20, 900000000000),
+               (5, 1, '/w/b.txt', 'file', 30, 900000000000),
+               (6, 1, '/w/c', 'directory', 10, 0),
+               (7, 6, '/w/c/x', 'file', 10, 900000000000),
+               (8, 2, '/w/a/nodate', 'file', 5, NULL),
+               (9, NULL, '/w0', 'file', 99, 900000000000);",
+        )
+        .unwrap();
+        let t = folder_timeline(&conn, "/w".into(), vec![500], vec!["/w/c".into()]).unwrap();
+        let names: Vec<&str> = t.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["a", "b.txt"]);
+        assert_eq!(t.children[0].bytes, [40, 20]);
+        assert_eq!(t.children[0].newest, Some(900));
+        assert_eq!(t.children[1].bytes, [0, 30]);
+        assert_eq!(t.rest, [0, 0]);
+        assert_eq!(t.undated, 5);
+    }
 }
 
 #[cfg(test)]

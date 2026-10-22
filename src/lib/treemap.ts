@@ -13,9 +13,23 @@ export interface BlockLayout {
   height: number;
 }
 
+/**
+ * Fold a folder whose only content is one folder into it, so "outputs" holding only
+ * "open-motion" holding only "panel" is one frame titled "outputs / open-motion / panel"
+ * instead of three nested headers. The frame keeps the outer path; a click opens the inner one.
+ */
+export function foldChains(d: Datum, depth = 0): Datum {
+  let n = d;
+  if (depth > 0) {
+    const only = (x: Datum) => (x.kind === 'directory' && x.children?.length === 1 && x.children[0].kind === 'directory' && x.children[0].total >= x.total * 0.98 ? x.children[0] : null);
+    for (let c = only(n); c; c = only(n)) n = { ...n, name: `${n.name} / ${c.name}`, target: c.target ?? c.path, children: c.children };
+  }
+  return n.children?.length ? { ...n, children: n.children.map((c) => foldChains(c, depth + 1)) } : n;
+}
+
 /** Nested block view: every folder is a frame holding its contents, sized by bytes. */
 export function layoutBlocks(datum: Datum, width: number, height: number): BlockLayout {
-  const root = hierarchy(datum).sum(ownBytes).sort(compareArcs) as unknown as Block;
+  const root = hierarchy(foldChains(datum)).sum(ownBytes).sort(compareArcs) as unknown as Block;
   // d3 positions a node before asking for its padding, so the band is only reserved
   // where it can hold a readable label; smaller folders keep a thin frame.
   const top = (n: HierarchyRectangularNode<Datum>) => {

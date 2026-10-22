@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { formatBytes } from '../../lib/format';
-import { inkFor } from '../../lib/colors';
+import { fileTint, inkFor } from '../../lib/colors';
 import { useStore } from '../../store';
 import type { Datum } from '../../lib/sunburst';
 import { HEADER, blockAt, layoutBlocks, type Block, type BlockLayout } from '../../lib/treemap';
@@ -24,6 +24,12 @@ interface Props {
 }
 
 const TWEEN_MS = 240;
+
+/** Wheel colours, except files take a shade of their folder so leaves do not read as one grey mass. */
+function blockColor(d: Block, colorBy: 'folder' | 'policy', light: boolean): string {
+  if (colorBy === 'folder' && d.data.kind !== 'directory' && !d.data.isRest && !d.data.isHidden) return fileTint(d.hue, d.depth, light);
+  return nodeColor(d, colorBy, light);
+}
 const FONT = '500 11px -apple-system, BlinkMacSystemFont, system-ui, sans-serif';
 type RectGeom = { x0: number; y0: number; x1: number; y1: number; color: string };
 
@@ -53,7 +59,7 @@ const Blocks: React.FC<{
 
   const fills = useMemo(() => {
     const m = new Map<Block, string>();
-    for (const d of layout.nodes) m.set(d, nodeColor(d, colorBy, light));
+    for (const d of layout.nodes) m.set(d, blockColor(d, colorBy, light));
     return m;
   }, [layout, colorBy, light]);
 
@@ -112,7 +118,7 @@ const Blocks: React.FC<{
       ctx.fillStyle = color;
       ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
       const w = x1 - x0, h = y1 - y0;
-      const name = d.data.isRest ? 'smaller objects' : d.data.name;
+      const name = d.data.isRest ? (d.data.count ? `${d.data.count} smaller items` : 'smaller items') : d.data.name;
       if (d.children && d.header >= HEADER && w > 44) labels.push({ x: x0, y: y0, w, h: HEADER, name, size: formatBytes(d.value ?? d.data.total), ink: inkFor(color), header: true, alpha });
       else if (!d.children && w > 54 && h > 30) labels.push({ x: x0, y: y0, w, h, name, size: formatBytes(d.value ?? d.data.total), ink: inkFor(color), header: false, alpha });
     }
@@ -254,7 +260,7 @@ export const Treemap: React.FC<Props> = ({ datum, path, loading, hoverPath, colo
   useEffect(() => {
     if (!shownLayout) return;
     const m = new Map<string, string>();
-    for (const d of shownLayout.nodes) m.set(d.data.path, nodeColor(d, colorBy, light));
+    for (const d of shownLayout.nodes) m.set(d.data.path, blockColor(d, colorBy, light));
     onLayout(m);
   }, [shownLayout, colorBy, light, onLayout]);
 
@@ -273,9 +279,9 @@ export const Treemap: React.FC<Props> = ({ datum, path, loading, hoverPath, colo
               onContextMenu={(d, e) => onContextMenu?.({ ...d.data, total: d.value ?? d.data.total }, e)}
               onClick={(d) => {
                 if (d.data.isRest) return onRemainder(d.parent?.data.path ?? d.data.path);
-                if (d.data.kind === 'directory') return onNavigate(d.data.path);
+                if (d.data.kind === 'directory') return onNavigate(d.data.target ?? d.data.path);
                 // A file opens the folder that holds it, unless that is the current folder.
-                if (d.parent && d.parent.depth > 0) onNavigate(d.parent.data.path);
+                if (d.parent && d.parent.depth > 0) onNavigate(d.parent.data.target ?? d.parent.data.path);
               }}
             />
           </div>

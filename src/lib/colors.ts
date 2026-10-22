@@ -27,6 +27,12 @@ export function fileColor(depth: number, light = false): string {
   return hsl(225, 0.04, Math.min(0.4 + (depth - 1) * 0.07, 0.7));
 }
 
+/** A file in the block view: a quiet shade of its folder's hue rather than flat grey. */
+export function fileTint(hue: number, depth: number, light = false): string {
+  if (light) return hsl(hue, 0.18, Math.max(0.66 - (depth - 1) * 0.04, 0.5));
+  return hsl(hue, 0.14, Math.min(0.36 + (depth - 1) * 0.05, 0.56));
+}
+
 export function restColor(light = false): string {
   return light ? 'hsl(225 6% 80%)' : '#393c40';
 }

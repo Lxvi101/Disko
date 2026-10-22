@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Search, Bot, Sun, Moon, PieChart, LayoutDashboard, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Bot, Sun, Moon, PieChart, LayoutDashboard, CalendarClock, RefreshCw } from 'lucide-react';
 import { useStore } from './store';
 import { Assistant } from './components/Assistant';
 import { Collector, CleanModal } from './components/Collector';
@@ -175,11 +175,12 @@ export const App: React.FC = () => {
             {onMap && (
               <span className="mr-2">
                 <SegmentedControl
-                  value={s.viz === 'treemap' ? 'treemap' : 'sunburst'}
+                  value={s.viz === 'treemap' || s.viz === 'timeline' ? s.viz : 'sunburst'}
                   onChange={s.setViz}
                   options={[
                     { value: 'sunburst', label: <PieChart className="w-3.5 h-3.5" />, title: 'Ring view' },
                     { value: 'treemap', label: <LayoutDashboard className="w-3.5 h-3.5" />, title: 'Block view' },
+                    { value: 'timeline', label: <CalendarClock className="w-3.5 h-3.5" />, title: 'Timeline: when this folder last changed' },
                   ]}
                 />
               </span>
