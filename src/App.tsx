@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Search, Bot, Sun, Moon, PieChart, LayoutDashboard, CalendarClock, RefreshCw } from 'lucide-react';
 import { useStore } from './store';
@@ -14,8 +14,8 @@ import { TimelinePage } from './components/pages/Timeline';
 import { QuarantinePage } from './components/pages/Quarantine';
 import { AppCleanupPage } from './components/pages/AppCleanup';
 import { JunkPage } from './components/pages/Junk';
-import { QuickCleanPage } from './components/pages/QuickClean';
-import { Sidebar, RAIL, RAIL_OPEN } from './components/Sidebar';
+import { QuickCleanPage } from './components/pages/FindSpace';
+import { Sidebar } from './components/Sidebar';
 import { ScanScreen } from './components/ScanScreen';
 import { useScan } from './hooks/useScan';
 import { Switch, SegmentedControl } from './components/ui';
@@ -49,8 +49,6 @@ export const App: React.FC = () => {
   const s = useStore();
   const { booted, bootError, boot, page, assistantOpen, setAssistantOpen, paletteOpen, setPaletteOpen, currentPath, rootPath, navigate, navigateUp, goBack, goForward, canBack, canForward, advanced, setAdvanced, colorBy, setColorBy, theme, resolvedTheme, setTheme, applyTheme, startScreen, setStartScreen, info, cleanModalOpen, setCleanModalOpen, trayOpen, setTrayOpen, select } = s;
   const { scan, scanning } = useScan();
-  const [pinned, setPinnedState] = useState(() => { try { return localStorage.getItem('disko.pinned') === '1'; } catch { return false; } });
-  const setPinned = (v: boolean) => { setPinnedState(v); try { localStorage.setItem('disko.pinned', v ? '1' : '0'); } catch {} };
 
   useEffect(() => { boot(); }, [boot]);
 
@@ -71,7 +69,6 @@ export const App: React.FC = () => {
       if (meta && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen(!paletteOpen); return; }
       if (meta && e.key.toLowerCase() === 'j') { e.preventDefault(); setAssistantOpen(!assistantOpen); return; }
       if (meta && e.key === '.') { e.preventDefault(); setAdvanced(!advanced); return; }
-      if (meta && e.key === '\\') { e.preventDefault(); setPinned(!pinnedRef.current); return; }
       if (meta && e.key === '[') { e.preventDefault(); goBack(); return; }
       if (meta && e.key === ']') { e.preventDefault(); goForward(); return; }
       if (e.key === 'Escape') {
@@ -87,9 +84,6 @@ export const App: React.FC = () => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [paletteOpen, assistantOpen, cleanModalOpen, trayOpen, page, advanced, navigateUp, select, setAssistantOpen, setCleanModalOpen, setPaletteOpen, setTrayOpen, setAdvanced, goBack, goForward, startScreen, setStartScreen, info?.db_loaded, scanning]);
-
-  const pinnedRef = React.useRef(pinned);
-  pinnedRef.current = pinned;
 
   const crumbs = useMemo(() => {
     if (!currentPath) return [] as { label: string; path: string }[];
@@ -127,8 +121,8 @@ export const App: React.FC = () => {
   const onMap = page === 'explore' && !showScan;
   return (
     <div className="app-shell h-full w-full flex overflow-hidden">
-      <Sidebar onScan={() => setStartScreen(!startScreen)} scanning={scanning} pinned={pinned} onPin={setPinned} />
-      <motion.div className="app-main flex-1 min-w-0 flex flex-col" initial={false} animate={{ paddingLeft: pinned ? RAIL_OPEN : RAIL }} transition={{ type: 'spring', stiffness: 420, damping: 38 }}>
+      <Sidebar onScan={() => setStartScreen(!startScreen)} scanning={scanning} />
+      <div className="app-main flex-1 min-w-0 flex flex-col">
         {/* top bar */}
         <header className="app-toolbar h-[52px] flex-shrink-0 flex items-center gap-2 px-4 drag-region">
           {onMap && (
@@ -203,7 +197,7 @@ export const App: React.FC = () => {
         </main>
 
         {page !== 'quick' && <Collector />}
-      </motion.div>
+      </div>
       <ContextMenuHost />
 
       <AnimatePresence initial={false}>

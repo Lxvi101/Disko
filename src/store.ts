@@ -89,6 +89,10 @@ interface AppState {
 
   // assistant
   assistantOpen: boolean;
+  /** A question typed somewhere else (Find space's ask box) for the assistant to send once it's open. */
+  assistantDraft: string | null;
+  /** Bytes the current Find space plan would free, so the sidebar can preview the disk. */
+  planBytes: number;
   messages: ChatMessage[];
   generating: string | null; // request id
   model: string;
@@ -130,6 +134,7 @@ interface AppState {
   setTrayOpen: (v: boolean) => void;
   setCleanModalOpen: (v: boolean) => void;
   setAssistantOpen: (v: boolean) => void;
+  askAssistant: (text: string) => void;
   setModel: (m: string) => void;
   setEffort: (e: string) => void;
   pushMessage: (m: ChatMessage) => void;
@@ -193,6 +198,8 @@ export const useStore = create<AppState>((set, get) => ({
   cleanupSelection: null,
 
   assistantOpen: false,
+  assistantDraft: null,
+  planBytes: 0,
   messages: [],
   generating: null,
   // '' means "whatever Codex picks": the model and effort from ~/.codex/config.toml.
@@ -390,6 +397,7 @@ export const useStore = create<AppState>((set, get) => ({
   setCleanModalOpen: (cleanModalOpen) => { if (!get().cleanupBusy) set({ cleanModalOpen }); },
 
   setAssistantOpen: (assistantOpen) => set({ assistantOpen }),
+  askAssistant: (text) => set({ assistantOpen: true, assistantDraft: text }),
   setModel: (model) => {
     const m = get().models?.models.find((x) => x.slug === model);
     const effort = m && m.efforts.includes(get().effort) ? get().effort : '';

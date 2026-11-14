@@ -379,6 +379,8 @@ export interface QuickItem {
   preselect: boolean; blocked: string | null;
   /** False while the size is still being measured. */
   measured?: boolean;
+  /** The app keeping it busy, e.g. "Visual Studio Code". */
+  holder?: string | null;
 }
 export interface QuickGroup {
   id: string; program: string; title: string; blurb: string; after: string;

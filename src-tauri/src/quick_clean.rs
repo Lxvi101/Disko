@@ -34,6 +34,9 @@ pub struct QuickItem {
     /// False until the size has been measured; discovery reports items before their size is known.
     #[serde(default)]
     pub measured: bool,
+    /// The app keeping this busy, e.g. "Visual Studio Code", so the UI can say what to quit.
+    #[serde(default)]
+    pub holder: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +155,82 @@ fn process_list() -> String {
     Command::new("/bin/ps").args(["-axo", "comm=", "-ww"]).output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase()).unwrap_or_default()
 }
+/// A running process and the folder it works in.
+#[derive(Debug, Clone)]
+pub(crate) struct Proc { pub name: String, pub app: Option<String>, pub cwd: PathBuf }
+
+/// The .app a command lives in: "/Applications/Visual Studio Code.app/Contents/…" → "Visual Studio Code".
+fn app_of(comm: &str) -> Option<String> {
+    let end = comm.find(".app/")?;
+    let start = comm[..end].rfind('/').map(|i| i + 1).unwrap_or(0);
+    Some(comm[start..end].to_string()).filter(|s| !s.is_empty())
+}
+
+/// Every process's working directory, with the app that started it. One `ps` and one `lsof`,
+/// both limited to working directories, so this takes well under a second.
+pub(crate) fn process_cwds() -> Vec<Proc> {
+    use std::collections::HashMap;
+    let ps = Command::new("/bin/ps").args(["-axo", "pid=,ppid=,comm=", "-ww"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
+    let mut table: HashMap<u32, (u32, String)> = HashMap::new();
+    for line in ps.lines() {
+        let line = line.trim_start();
+        let Some((pid, rest)) = line.split_once(char::is_whitespace) else { continue };
+        let rest = rest.trim_start();
+        let Some((ppid, comm)) = rest.split_once(char::is_whitespace) else { continue };
+        if let (Ok(pid), Ok(ppid)) = (pid.parse(), ppid.parse()) { table.insert(pid, (ppid, comm.trim().to_string())); }
+    }
+    let app_for = |mut pid: u32| -> Option<String> {
+        for _ in 0..24 {
+            let (ppid, comm) = table.get(&pid)?;
+            if let Some(app) = app_of(comm) { return Some(app); }
+            if *ppid <= 1 { return None; }
+            pid = *ppid;
+        }
+        None
+    };
+    let out = Command::new("/usr/sbin/lsof").args(["-nP", "-w", "-d", "cwd", "-F", "pn"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
+    let mut procs = vec![];
+    let mut pid = 0u32;
+    for line in out.lines() {
+        if let Some(p) = line.strip_prefix('p') { pid = p.parse().unwrap_or(0); }
+        else if let Some(n) = line.strip_prefix('n') {
+            if n == "/" || pid == 0 { continue; }
+            let name = table.get(&pid).map(|(_, c)| c.rsplit('/').next().unwrap_or(c).to_string()).unwrap_or_default();
+            procs.push(Proc { name, app: app_for(pid), cwd: PathBuf::from(n) });
+        }
+    }
+    procs
+}
+
+/// Tools that use a project's build output or dependencies while they run in it.
+fn tools_for(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::RustTarget => &["cargo", "rustc", "rust-analyzer", "rust-analyzer-proc-macro-srv", "clippy-driver", "bacon", "cargo-watch"],
+        Kind::SwiftBuild => &["swift-build", "swift-frontend", "sourcekit-lsp", "swift-test", "xcodebuild"],
+        Kind::NodeModules | Kind::WebBuild => &["node", "bun", "deno", "npm", "pnpm", "yarn", "next-server", "vite", "tsserver"],
+        Kind::PythonVenv | Kind::PythonCache => &["python", "python3", "uv", "pytest", "pip", "jupyter", "ruff", "mypy"],
+        Kind::Pods => &["pod", "xcodebuild"],
+        Kind::Gradle => &["java", "gradle", "kotlin-daemon"],
+    }
+}
+
+/// Who is using this folder right now: a process working inside it, or one of the project's own
+/// tools (rust-analyzer, a dev server…) working in the project it belongs to. A terminal sitting in
+/// the project doesn't count.
+pub(crate) fn holder<'a>(procs: &'a [Proc], item: &Path, project: &Path, kind: Option<Kind>) -> Option<&'a Proc> {
+    procs.iter().find(|p| {
+        if p.cwd.starts_with(item) { return true; }
+        let Some(kind) = kind else { return false };
+        p.cwd.starts_with(project) && tools_for(kind).iter().any(|t| p.name == *t || (t.len() > 4 && p.name.starts_with(t)))
+    })
+}
+
+fn busy_text(p: &Proc) -> (String, String) {
+    let who = p.app.clone().unwrap_or_else(|| p.name.clone());
+    let what = if p.app.is_some() && p.app.as_deref() != Some(p.name.as_str()) { format!("{} has this project open ({}).", who, p.name) } else { format!("{} is running in this project.", who) };
+    (what, who)
+}
+
 fn running(list: &str, names: &[&str]) -> bool {
     list.lines().any(|l| {
         let base = l.trim().rsplit('/').next().unwrap_or("");
@@ -173,6 +252,7 @@ fn dev_roots(home: &Path) -> Vec<PathBuf> {
         "Documents/Development", "Development", "Developer", "Projects", "projects", "Code", "code", "src", "dev", "Dev",
         "repos", "Repos", "GitHub", "git", "workspace", "Workspace", "Sites", "Documents/Codex", "Documents/GitHub",
         "Documents/Projects", "Documents/Code", "Desktop", ".codex/worktrees", "conductor", ".worktrees", ".cursor/worktrees",
+        ".cache",
     ];
     let mut seen = HashSet::new();
     names.iter().map(|n| home.join(n))
@@ -181,8 +261,16 @@ fn dev_roots(home: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Cargo marks its target folders with a cache tag. Custom target dirs (CARGO_TARGET_DIR) often
+/// have other names like `target-agents` and live away from Cargo.toml.
+fn is_cargo_target(path: &Path) -> bool {
+    fs::read_to_string(path.join("CACHEDIR.TAG")).is_ok_and(|t| t.contains("created by cargo"))
+        && (path.join("debug").is_dir() || path.join("release").is_dir() || path.join("tmp").is_dir())
+}
+
 fn classify_dir(path: &Path, name: &str) -> Option<Kind> {
     let parent = path.parent()?;
+    if name != "target" && name.contains("target") && is_cargo_target(path) { return Some(Kind::RustTarget); }
     let has = |f: &str| parent.join(f).exists();
     match name {
         // A cache marker alone is not enough: the folder must sit next to the manifest that builds it.
@@ -242,11 +330,11 @@ fn project_label(project: &Path, home: &Path) -> (String, String) {
     (format!("{}{}", name, origin), short(project, home))
 }
 
-fn project_groups(home: &Path, procs: &str) -> Vec<QuickGroup> {
+fn project_groups(home: &Path, procs: &str, cwds: &[Proc]) -> Vec<QuickGroup> {
     let mut found = vec![];
     let mut seen = HashSet::new();
     for root in dev_roots(home) {
-        let depth = if root.ends_with("Desktop") { 3 } else { 7 };
+        let depth = if root.ends_with("Desktop") || root.ends_with(".cache") { 3 } else { 7 };
         walk_projects(&root, depth, &mut found, &mut seen);
     }
     // Project folders inside other agents' checkouts under each project: `.claude/worktrees`.
@@ -255,18 +343,26 @@ fn project_groups(home: &Path, procs: &str) -> Vec<QuickGroup> {
 
     let sized: Vec<(Kind, QuickItem)> = found.into_par_iter().filter_map(|f| {
         let project = f.path.parent()?.to_path_buf();
-        let (label, detail) = project_label(&project, home);
+        let (mut label, mut detail) = project_label(&project, home);
+        let own = name_of(&f.path);
+        if f.kind == Kind::RustTarget && own != "target" { label = format!("{} › {}", name_of(&project), own); detail = short(&f.path, home); }
         let activity = recent_activity(&f.path);
         let idle_days = activity.map(|t| now().saturating_sub(t) / DAY).unwrap_or(9999);
         let hot = activity.is_some_and(|t| now().saturating_sub(t) < 3600);
         let busy = match f.kind { Kind::RustTarget => cargo_busy && hot, Kind::SwiftBuild => swift_busy && hot, _ => hot };
-        let blocked = busy.then(|| "Something is building here right now.".to_string());
-        // Dependencies need a reinstall, so only tick ones that haven't been touched for a while.
-        let threshold = match f.kind { Kind::PythonCache | Kind::WebBuild => 3, Kind::RustTarget | Kind::SwiftBuild | Kind::Gradle => 7, _ => 14 };
+        let (blocked, holder) = match holder(cwds, &f.path, &project, Some(f.kind)) {
+            Some(p) => { let (what, who) = busy_text(p); (Some(what), Some(who)) }
+            None if busy => (Some("Something is building here right now.".to_string()), None),
+            None => (None, None),
+        };
+        // Build output rebuilds itself, so it's ticked unless it was built in the last day.
+        // Dependencies need a reinstall, so only tick ones that haven't been touched for two weeks.
+        let rebuilds = matches!(f.kind, Kind::RustTarget | Kind::SwiftBuild | Kind::WebBuild | Kind::PythonCache | Kind::Gradle);
+        let wanted = if rebuilds { idle_days >= 1 } else { idle_days >= 14 };
         let item = QuickItem {
             id: format!("p:{}", f.path.display()), path: f.path.to_string_lossy().into(), label,
             detail: format!("{} · {}", detail, age_label(activity)), total: 0, modified: activity,
-            preselect: blocked.is_none() && idle_days >= threshold, blocked, measured: false,
+            preselect: blocked.is_none() && wanted, blocked, measured: false, holder,
         };
         Some((f.kind, item))
     }).collect();
@@ -303,7 +399,7 @@ fn group(id: &str, program: &str, title: &str, blurb: &str, after: &str, items: 
 fn dir_item(path: PathBuf, label: &str, home: &Path, preselect: bool) -> Option<QuickItem> {
     if !is_real_dir(&path) && !fs::symlink_metadata(&path).map(|m| m.is_file()).unwrap_or(false) { return None; }
     let modified = mtime(&path);
-    Some(QuickItem { id: format!("p:{}", path.display()), detail: short(&path, home), path: path.to_string_lossy().into(), label: label.into(), total: 0, modified, preselect, blocked: None, measured: false })
+    Some(QuickItem { id: format!("p:{}", path.display()), detail: short(&path, home), path: path.to_string_lossy().into(), label: label.into(), total: 0, modified, preselect, blocked: None, measured: false, holder: None })
 }
 
 struct CacheSpec {
@@ -454,7 +550,7 @@ fn docker_groups(home: &Path, procs: &str) -> (Vec<QuickGroup>, Option<String>) 
             "Images" => ("docker-images", "Unused images", "Images no container uses, including old base images.", "Pulled again when needed. Images you built and never pushed are gone for good, so review first.", "image prune -af", false),
             _ => continue, // containers and volumes are never touched
         };
-        let item = QuickItem { id: format!("cmd:{}", id), path: String::new(), label: title.into(), detail: format!("docker {}", args), total: reclaim, modified: None, preselect: pre, blocked: None, measured: true };
+        let item = QuickItem { id: format!("cmd:{}", id), path: String::new(), label: title.into(), detail: format!("docker {}", args), total: reclaim, modified: None, preselect: pre, blocked: None, measured: true, holder: None };
         let mut g = group(id, "Docker", title, blurb, after, vec![item]);
         g.method = "command".into();
         g.command = Some(format!("{} {}", docker.display(), args));
@@ -539,8 +635,7 @@ fn system_groups(home: &Path, procs: &str, notes: &mut Vec<String>) -> Vec<Quick
         let Ok(inv) = app_cleanup::inventory(home, id) else { continue };
         let items: Vec<QuickItem> = inv.items.iter().filter(|i| i.group == "version" && i.blocked.is_none() && i.total >= MIN_ITEM).map(|i| QuickItem {
             id: format!("p:{}", i.path), path: i.path.clone(), label: format!("Version {}", i.name), detail: short(Path::new(&i.path), home),
-            total: i.total, modified: i.modified, preselect: true, blocked: None, measured: true,
-        }).collect();
+            total: i.total, modified: i.modified, preselect: true, blocked: None, measured: true, holder: None }).collect();
         if !items.is_empty() {
             out.push(group(&format!("{}-versions", id), "AI agents", &format!("Old {} versions", program), "Earlier copies left behind by auto-updates.", "The version you use and the newest one are always kept.", items));
         }
@@ -589,18 +684,20 @@ pub fn discover(home: &Path, emit: &mut dyn FnMut(QuickEvent)) -> Result<QuickRe
     let _reset = Reset;
 
     let procs = process_list();
+    let cwds = process_cwds();
     let (tx, rx) = std::sync::mpsc::channel::<Msg>();
     let home_buf = home.to_path_buf();
     let worker = std::thread::spawn(move || {
         let home = home_buf.as_path();
         let procs = procs.as_str();
+        let cwds = cwds.as_slice();
         rayon::scope(|s| {
             for source in 0..5 {
                 let tx = tx.clone();
                 s.spawn(move |_| {
                     let mut notes = vec![];
                     let groups = match source {
-                        0 => project_groups(home, procs),
+                        0 => project_groups(home, procs, cwds),
                         1 => cache_groups(home, procs),
                         2 => xcode_groups(home, procs),
                         3 => { let (g, n) = docker_groups(home, procs); notes.extend(n); g }
@@ -716,6 +813,12 @@ pub fn clean(home: &Path, ids: &[String], progress: &mut dyn FnMut(QuickProgress
     work.sort_by_key(|(g, _)| if g.method == "command" { 1 } else { 0 });
     let count: usize = work.iter().map(|(g, items)| if g.method == "command" { 1 } else { items.len() }).sum();
     let mut result = QuickResult { freed_bytes: 0, removed: vec![], commands: vec![], failures: vec![] };
+    // Picked but in use: say so instead of skipping it quietly.
+    for g in &report.groups {
+        for i in g.items.iter().filter(|i| wanted.contains(&i.id)) {
+            if let Some(why) = &i.blocked { result.failures.push(QuickFailure { label: i.label.clone(), error: why.clone() }); }
+        }
+    }
     let mut index = 0;
     for (g, items) in work {
         if g.method == "command" {
@@ -777,6 +880,37 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         fs::canonicalize(d).unwrap()
+    }
+
+    #[test]
+    fn app_names_come_from_the_outermost_bundle() {
+        assert_eq!(app_of("/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)").as_deref(), Some("Visual Studio Code"));
+        assert_eq!(app_of("/usr/bin/zsh"), None);
+    }
+
+    #[test]
+    fn project_tools_hold_a_folder_but_terminals_do_not() {
+        let project = PathBuf::from("/p/app");
+        let target = project.join("target");
+        let p = |name: &str, cwd: &str| Proc { name: name.into(), app: None, cwd: cwd.into() };
+        assert!(holder(&[p("zsh", "/p/app")], &target, &project, Some(Kind::RustTarget)).is_none());
+        assert!(holder(&[p("rust-analyzer", "/p/app")], &target, &project, Some(Kind::RustTarget)).is_some());
+        assert!(holder(&[p("node", "/p/app")], &target, &project, Some(Kind::RustTarget)).is_none());
+        assert!(holder(&[p("zsh", "/p/app/target/debug")], &target, &project, Some(Kind::RustTarget)).is_some());
+        assert!(holder(&[p("cargo", "/p/application")], &target, &project, Some(Kind::RustTarget)).is_none());
+    }
+
+    #[test]
+    fn custom_cargo_target_dirs_are_found_by_their_tag() {
+        let root = tmp("cargo-tag");
+        let t = root.join("tools/target-agents");
+        fs::create_dir_all(t.join("debug")).unwrap();
+        fs::write(t.join("CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag created by cargo.\n").unwrap();
+        // Same name, no tag: somebody's data.
+        fs::create_dir_all(root.join("photos/target-practice/debug")).unwrap();
+        let mut out = vec![];
+        walk_projects(&root, 5, &mut out, &mut HashSet::new());
+        assert_eq!(out.iter().filter(|f| f.kind == Kind::RustTarget).map(|f| f.path.clone()).collect::<Vec<_>>(), vec![t]);
     }
 
     #[test]

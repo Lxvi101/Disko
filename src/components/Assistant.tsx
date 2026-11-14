@@ -142,6 +142,14 @@ export const Assistant: React.FC = () => {
     }
   }, []);
 
+  // A question asked from Find space's ask box.
+  const draft = useStore((st) => st.assistantDraft);
+  useEffect(() => {
+    if (!draft) return;
+    useStore.setState({ assistantDraft: null });
+    send(draft);
+  }, [draft, send]);
+
   useEffect(() => {
     const handler = (e: Event) => {
       const q = (e as CustomEvent<string>).detail;
