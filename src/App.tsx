@@ -153,9 +153,7 @@ export const App: React.FC = () => {
             {onMap && advanced && (
               <span className="flex items-center gap-1 text-[11.5px] mr-2" style={{ color: 'var(--muted)' }}>
                 Colour by
-                {(['folder', 'policy'] as const).map((c) => (
-                  <button key={c} onClick={() => setColorBy(c)} className="px-1.5 rounded transition-colors" style={{ color: colorBy === c ? 'var(--text)' : 'var(--dim)', background: colorBy === c ? 'var(--bg-3)' : 'transparent' }}>{c}</button>
-                ))}
+                <SegmentedControl value={colorBy} onChange={setColorBy} options={[{ value: 'folder', label: 'Folder', title: 'Colour by folder' }, { value: 'policy', label: 'Safety', title: 'Colour by how safe it is to remove' }]} />
               </span>
             )}
             {onMap && s.coverageIssues > 0 && <span className="tnum text-[11.5px] mr-2" style={{ color: 'var(--dim)' }} title="Folders macOS did not let Disko read. Grant Full Disk Access and rescan to include them.">{formatNumber(s.coverageIssues)} unreadable</span>}
@@ -196,7 +194,7 @@ export const App: React.FC = () => {
           </AnimatePresence>
         </main>
 
-        {page !== 'quick' && <Collector />}
+        {page !== 'quick' && !showScan && <Collector />}
       </div>
       <ContextMenuHost />
 

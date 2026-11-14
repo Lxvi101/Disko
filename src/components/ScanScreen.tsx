@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Home, HardDrive, FolderSearch, Shield, ChevronRight, X, Lock } from 'lucide-react';
 import { useStore } from '../store';
 import { useScan } from '../hooks/useScan';
+import { GlassFolder } from './ui';
 import { api, errorText } from '../lib/api';
 import { formatBytes, formatNumber, relativeTime, formatDuration, shortPath } from '../lib/format';
 import type { LiveJunk, ScanInfo } from '../types';
@@ -116,7 +117,8 @@ export const ScanScreen: React.FC = () => {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-[560px] mx-auto px-8 pt-14 pb-16">
+      <div className="max-w-[560px] mx-auto px-8 pt-10 pb-16">
+        <div className="flex justify-center mb-8"><GlassFolder big mood="idle" /></div>
         {active && (
           <section className="mb-10">
             <h1 className="text-[22px] font-semibold tracking-tight">Welcome back</h1>

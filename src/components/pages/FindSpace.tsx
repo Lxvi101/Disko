@@ -3,6 +3,7 @@ import { motion, AnimatePresence, animate } from 'framer-motion';
 import { create } from 'zustand';
 import { ArrowRight, ArrowUp, Check, RefreshCw } from 'lucide-react';
 import { useStore } from '../../store';
+import { GlassFolder } from '../ui';
 import { api, errorText, onQuickProgress, onQuickScan } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
 import type { QuickCleanOutcome, QuickGroup, QuickItem, QuickProgress, QuickReport, QuickScanEvent } from '../../types';
@@ -225,13 +226,6 @@ const fade = { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, exi
 // ---------------------------------------------------------------------------
 // Pieces
 
-export const GlassFolder: React.FC<{ color?: string; big?: boolean; mood?: 'idle' | 'open' | 'eat' | 'breathe' | 'sleep' | 'wobble' }> = ({ color = '#5b8cff', big, mood = 'idle' }) => (
-  <span className={`gf ${big ? 'gf-big' : ''}`} data-mood={mood} style={{ '--fc': color } as React.CSSProperties} aria-hidden="true">
-    <span className="gf-back" />
-    {big && <><span className="gf-paper" /><span className="gf-paper" /><span className="gf-paper" /></>}
-    <span className="gf-front" />
-  </span>
-);
 
 const CHIPS: { label: string; run: () => void }[] = [
   { label: 'Everything that’s safe', run: () => find('safe', '') },

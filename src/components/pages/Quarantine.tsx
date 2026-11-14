@@ -4,7 +4,7 @@ import { Archive, RotateCcw, Flame, Eye, Trash2, CheckCircle2, AlertTriangle, Ch
 import { useStore } from '../../store';
 import { api, errorText } from '../../lib/api';
 import { formatBytes, formatDate, relativeTime, shortPath } from '../../lib/format';
-import { Empty, Modal, Spinner } from '../ui';
+import { Modal, Spinner, GlassFolder, PageHeader } from '../ui';
 import type { QuarantineJournal } from '../../types';
 
 export const QuarantinePage: React.FC = () => {
@@ -42,7 +42,7 @@ export const QuarantinePage: React.FC = () => {
       const s = useStore.getState();
       s.boot();
     } catch (e) {
-      toast({ kind: 'error', title: 'Purge failed', detail: errorText(e) });
+      toast({ kind: 'error', title: 'Could not empty it', detail: errorText(e) });
     } finally {
       setBusy(null);
     }
@@ -58,25 +58,25 @@ export const QuarantinePage: React.FC = () => {
   };
 
   if (journals.length === 0) {
-    return <Empty icon={<Archive className="w-6 h-6" />} title="Quarantine is empty" body="When you clean items, they are moved here first. Restore them any time, or purge to actually free the space." />;
+    return (
+      <div className="empty-hero">
+        <GlassFolder big mood="sleep" />
+        <h2>Quarantine is empty</h2>
+        <p>When you move your own files out of the way, they wait here first. Put them back any time, or empty a batch to free the space for good.</p>
+      </div>
+    );
   }
 
   return (
-    <div className="h-full overflow-y-auto px-6 pt-4 pb-8">
-      <div className="max-w-[980px] mx-auto">
-        <div className="card p-4 flex items-center gap-4 mb-4" >
-          <div className="w-11 h-11 rounded-2xl glass flex items-center justify-center" style={{ color: 'var(--muted)' }}>
-            <Archive className="w-5 h-5" />
-          </div>
-          <div className="flex-1">
-            <div className="text-[13.5px] font-semibold">
-              {active.length ? `${formatBytes(heldBytes)} waiting in quarantine` : 'Nothing waiting in quarantine'}
-            </div>
-            <div className="text-[12px] mt-0.5" style={{ color: 'var(--muted)' }}>
-              Quarantine does not free space by itself. Purge a batch once you are sure you do not need it back.
-            </div>
-          </div>
-        </div>
+    <div className="page-scroll h-full overflow-y-auto">
+      <div className="max-w-[980px] mx-auto px-8 pt-7">
+        <PageHeader
+          title="Quarantine"
+          color="#9db4ff"
+          sub={active.length
+            ? <><strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(heldBytes)}</strong> waiting in {active.length} {active.length === 1 ? 'batch' : 'batches'}. It still takes up space until you empty it, so empty a batch once you’re sure you won’t need it back.</>
+            : 'Nothing waiting. Earlier batches are listed below.'}
+        />
 
         {active.length > 0 && <h3 className="label px-1 mb-2">Held</h3>}
         <div className="space-y-2.5">
@@ -96,7 +96,7 @@ export const QuarantinePage: React.FC = () => {
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: j.purged ? 'var(--ok)' : 'var(--muted)' }} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[12.5px] font-medium">
-                      {j.purged ? 'Purged' : 'Restored'} {j.items.length} item{j.items.length === 1 ? '' : 's'} · {formatBytes(j.total_bytes)}
+                      {j.purged ? 'Emptied' : 'Put back'} {j.items.length} item{j.items.length === 1 ? '' : 's'} · {formatBytes(j.total_bytes)}
                     </div>
                     <div className="text-[11px]" style={{ color: 'var(--dim)' }}>{formatDate(j.created_at)}</div>
                   </div>
@@ -121,7 +121,7 @@ export const QuarantinePage: React.FC = () => {
           <>
             <button className="btn" onClick={() => setPurgeTarget(null)} disabled={!!busy}>Cancel</button>
             <button className="btn btn-danger" onClick={purge} disabled={!!busy}>
-              {busy ? <Spinner /> : <Flame className="w-3.5 h-3.5" />} Purge {purgeTarget ? formatBytes(purgeTarget.items.filter((i) => i.present).reduce((a, b) => a + b.size, 0)) : ''}
+              {busy ? <Spinner /> : <Flame className="w-3.5 h-3.5" />} Empty {purgeTarget ? formatBytes(purgeTarget.items.filter((i) => i.present).reduce((a, b) => a + b.size, 0)) : ''}
             </button>
           </>
         }
@@ -148,12 +148,10 @@ const JournalCard: React.FC<{ j: QuarantineJournal; home: string; busy: boolean;
   return (
     <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }} className="card overflow-hidden">
       <div className="p-4 flex items-center gap-4">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'var(--bg-3)', color: 'var(--muted)' }}>
-          <Archive className="w-4.5 h-4.5" />
-        </div>
+        <GlassFolder color="#9db4ff" />
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2">
-            <span className="mono text-[16px] font-semibold">{formatBytes(bytes)}</span>
+            <span className="tnum text-[16px] font-semibold">{formatBytes(bytes)}</span>
             <span className="text-[12.5px]" style={{ color: 'var(--muted)' }}>
               {present.length} item{present.length === 1 ? '' : 's'} · {relativeTime(j.created_at)}
             </span>
@@ -176,10 +174,10 @@ const JournalCard: React.FC<{ j: QuarantineJournal; home: string; busy: boolean;
             <Eye className="w-4 h-4" />
           </button>
           <button className="btn" onClick={onRestore} disabled={busy}>
-            {busy ? <Spinner /> : <RotateCcw className="w-3.5 h-3.5" />} Restore
+            {busy ? <Spinner /> : <RotateCcw className="w-3.5 h-3.5" />} Put back
           </button>
           <button className="btn btn-danger" onClick={onPurge} disabled={busy}>
-            <Flame className="w-3.5 h-3.5" /> Purge
+            <Flame className="w-3.5 h-3.5" /> Empty
           </button>
         </div>
       </div>

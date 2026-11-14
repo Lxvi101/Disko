@@ -3,7 +3,7 @@ import { Copy, FolderOpen, History, RefreshCw, Terminal } from 'lucide-react';
 import { useStore } from '../../store';
 import { api, errorText } from '../../lib/api';
 import { formatBytes, shortPath } from '../../lib/format';
-import { Empty, SegmentedControl, Spinner } from '../ui';
+import { Empty, SegmentedControl, Spinner, GlassFolder } from '../ui';
 import { memberToStaged } from './Suggestions';
 import type { OldItem, StagedItem, TimelineLane } from '../../types';
 
@@ -130,16 +130,17 @@ export const TimelinePage: React.FC = () => {
 
   const thresholdLabel = THRESHOLDS.find((t) => t.value === threshold)!.label;
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll h-full overflow-y-auto">
       <div className="max-w-[1120px] mx-auto px-8 pt-7 pb-8">
-        <header className="flex items-end justify-between gap-4">
-          <div>
+        <header className="page-head">
+          <GlassFolder color="#f5a524" mood="wobble" />
+          <div className="page-head-text">
             <h1 className="text-[26px] font-bold tracking-tight leading-none">Timeline</h1>
             <p className="text-[13px] mt-2" style={{ color: 'var(--muted)' }}>
               <strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(staleBytes)}</strong> in {stale.length} things you haven’t used in over {thresholdLabel}.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="page-head-actions">
             <span className="text-[12px]" style={{ color: 'var(--muted)' }}>Unused for</span>
             <SegmentedControl value={threshold} onChange={setThreshold} options={THRESHOLDS.map((t) => ({ value: t.value, label: t.label }))} />
             <button className="btn btn-ghost btn-icon" title="Check again" onClick={() => { setItems(null); setRefresh((n) => n + 1); }}><RefreshCw className="w-4 h-4" /></button>

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ChevronDown, Copy, FolderOpen, LockKeyhole, Minus, Terminal } from 'lucide-react';
 import { useStore } from '../store';
+import { GlassFolder } from './ui';
 import { api } from '../lib/api';
 import { formatBytes } from '../lib/format';
 import type { Cluster, ClusterGroup, ClusterItem } from '../lib/programs';
@@ -89,7 +90,7 @@ export const ClusterBrowser: React.FC<{
               onClick={() => setActive(c.program.id)}
               style={{ '--p-color': c.program.color } as React.CSSProperties}
             >
-              <span className="program-tile">{c.program.emoji}</span>
+              <GlassFolder color={c.program.color} />
               <span className="flex-1 min-w-0 text-left">
                 <span className="block text-[13px] font-semibold truncate">{c.program.name}</span>
                 <span className="block text-[11px] truncate" style={{ color: 'var(--dim)' }}>
@@ -108,7 +109,7 @@ export const ClusterBrowser: React.FC<{
           {current && (
             <motion.div key={current.program.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }}>
               <header className="flex items-center gap-4 mb-5" style={{ '--p-color': current.program.color } as React.CSSProperties}>
-                <span className="program-tile large">{current.program.emoji}</span>
+                <GlassFolder key={current.program.id} color={current.program.color} mood="wobble" />
                 <div className="flex-1 min-w-0">
                   <h2 className="text-[22px] font-bold tracking-tight leading-tight">{current.program.name}</h2>
                   <p className="text-[12.5px]" style={{ color: 'var(--muted)' }}>{current.program.blurb}</p>

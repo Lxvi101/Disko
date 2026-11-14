@@ -6,7 +6,7 @@ import { LIVE_APPS, type AppProfile } from '../../lib/appProfiles';
 import { api, errorText } from '../../lib/api';
 import { formatBytes, shortPath } from '../../lib/format';
 import { XcodeCleanupSection } from './Xcode';
-import { Spinner } from '../ui';
+import { Spinner, GlassFolder } from '../ui';
 import type { AppStorageInventory, CandidateItem, StagedItem, XcodeInventory } from '../../types';
 
 type Card = { id: string; name: string; category: string; color: string; mark: string; description: string; tagline: string; total?: number; potential?: number; count?: number; partial?: boolean; error?: string; scope: string };
@@ -74,7 +74,7 @@ export const AppCleanupPage: React.FC = () => {
   const activeCard = cards.find((app) => app.id === selected);
 
   return (
-    <div ref={scroller} className="app-store-page h-full overflow-y-auto">
+    <div ref={scroller} className="page-scroll app-store-page h-full overflow-y-auto">
       <div className="app-store-content">
         {activeCard ? (
           <ProductPage
@@ -102,12 +102,13 @@ export const AppCleanupPage: React.FC = () => {
           </ProductPage>
         ) : (
           <>
-            <header className="flex items-end justify-between gap-4 mb-6">
-              <div>
+            <header className="page-head">
+              <GlassFolder color="#a78bfa" mood="wobble" />
+              <div className="page-head-text">
                 <h1 className="text-[30px] font-bold tracking-tight leading-none">Apps</h1>
                 <p className="text-[13px] mt-2" style={{ color: 'var(--muted)' }}>Free up space hiding inside the apps you use.</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="page-head-actions">
                 <label className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: 'var(--dim)' }} />
                   <input className="input !pl-8 !w-52 !rounded-full" aria-label="Search apps" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />

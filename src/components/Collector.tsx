@@ -4,7 +4,7 @@ import { X, Eye, Sparkles, Archive, Trash2, Check } from 'lucide-react';
 import { useStore } from '../store';
 import { api, errorText, onCleanupProgress } from '../lib/api';
 import { formatBytes, shortPath, catMeta } from '../lib/format';
-import { Modal, Spinner } from './ui';
+import { Modal, Spinner, GlassFolder } from './ui';
 import type { CleanupProgress, StagedItem } from '../types';
 import { openItemMenu } from './ContextMenu';
 
@@ -36,34 +36,36 @@ export const Collector: React.FC = () => {
   };
 
   return (
-    <div className="collector relative flex items-center gap-4 h-[72px] px-6 flex-shrink-0" style={{ borderTop: advanced ? '1px solid var(--line)' : undefined }}>
+    <div className="collector-dock" data-full={count > 0} data-over={over}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={onDrop}>
       {/* target */}
       <motion.button
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setOver(true); }}
         onDragLeave={() => setOver(false)}
         onDrop={onDrop}
         onClick={() => count > 0 && setTrayOpen(!trayOpen)}
-        animate={{ scale: over ? 1.08 : 1 }}
-        className="relative w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
-        style={{ border: `1.5px solid ${over ? 'var(--text)' : 'var(--line-2)'}` }}
+        animate={{ scale: over ? 1.12 : 1 }}
+        className="collector-target"
         id="disko-collector-target"
         title={count ? 'Show collected items' : 'Drop files here'}
       >
-        <span className="rounded-full" style={{ width: 28, height: 28, border: `1.5px solid ${over ? 'var(--text)' : 'var(--line-2)'}` }} />
+        <GlassFolder color="#5b8cff" mood={over ? 'open' : 'idle'} />
         <AnimatePresence>
           {count > 0 && (
-            <motion.span key={count} initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} className="absolute inset-0 flex items-center justify-center tnum text-[12px] font-semibold">
+            <motion.span key={count} initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} className="collector-count tnum">
               {count}
             </motion.span>
           )}
         </AnimatePresence>
       </motion.button>
 
-      <div className="flex-1 min-w-0" onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop}>
+      <div className="min-w-0">
         <AnimatePresence mode="wait" initial={false}>
           {count === 0 ? (
-            <motion.span key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-[13px]" style={{ color: 'var(--dim)' }}>
-              {onMap ? 'Drag items here, or right-click → Add to Collector' : 'Tick items to collect them here, then clean up in one go'}
+            <motion.span key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-[12.5px] pr-2 whitespace-nowrap" style={{ color: 'var(--muted)' }}>
+              {over ? 'Drop to collect' : onMap ? 'Drag things here to collect them' : 'Ticked items collect here'}
             </motion.span>
           ) : (
             <motion.div key="full" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="flex items-center gap-4">
@@ -91,7 +93,7 @@ export const Collector: React.FC = () => {
       {/* popover list */}
       <AnimatePresence>
         {trayOpen && count > 0 && (
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} className="absolute left-6 bottom-[80px] w-[460px] panel-raised p-2 z-40">
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} className="absolute left-0 bottom-[62px] w-[460px] panel-raised p-2 z-40">
             <div className="max-h-[40vh] overflow-y-auto">
               {staged.map((s) => (
                 <div key={s.path} className="group flex items-center gap-2.5 px-2 h-9 rounded-lg row-hover" title={s.path} onContextMenu={(e) => openItemMenu(e, s)}>

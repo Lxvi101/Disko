@@ -103,12 +103,12 @@ export const Empty: React.FC<{ icon: React.ReactNode; title: string; body?: Reac
 );
 
 export const SegmentedControl = <T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { value: T; label: React.ReactNode; title?: string }[] }) => (
-  <div className="relative inline-flex items-center gap-0.5">
+  <div className="segmented">
     {options.map((o) => {
       const active = o.value === value;
       return (
-        <button key={o.value} title={o.title} onClick={() => onChange(o.value)} className="relative px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors" style={{ color: active ? 'var(--text)' : 'var(--muted)' }}>
-          {active && <motion.span layoutId="segment-bg" className="absolute inset-0 rounded-md" style={{ background: 'var(--bg-3)' }} transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
+        <button key={o.value} title={o.title} aria-pressed={active} onClick={() => onChange(o.value)} className="segmented-item">
+          {active && <motion.span layoutId="segment-bg" className="segmented-active" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
           <span className="relative flex items-center gap-1.5">{o.label}</span>
         </button>
       );
@@ -121,4 +121,25 @@ export const Switch: React.FC<{ on: boolean; onChange: (v: boolean) => void; lab
     {label}
     <span className={`switch ${on ? 'on' : ''}`} />
   </button>
+);
+
+/** The glass folder from Find space. `mood` animates it: open, eat, breathe, sleep, wobble. */
+export const GlassFolder: React.FC<{ color?: string; big?: boolean; mood?: 'idle' | 'open' | 'eat' | 'breathe' | 'sleep' | 'wobble'; className?: string }> = ({ color = '#5b8cff', big, mood = 'idle', className = '' }) => (
+  <span className={`gf ${big ? 'gf-big' : ''} ${className}`} data-mood={mood} style={{ '--fc': color } as React.CSSProperties} aria-hidden="true">
+    <span className="gf-back" />
+    {big && <><span className="gf-paper" /><span className="gf-paper" /><span className="gf-paper" /></>}
+    <span className="gf-front" />
+  </span>
+);
+
+/** Every page's heading: a glass folder, a title, one plain sentence, and actions on the right. */
+export const PageHeader: React.FC<{ title: React.ReactNode; sub?: React.ReactNode; color?: string; actions?: React.ReactNode; className?: string }> = ({ title, sub, color, actions, className = '' }) => (
+  <header className={`page-head ${className}`}>
+    {color && <GlassFolder color={color} mood="wobble" />}
+    <div className="page-head-text">
+      <h1>{title}</h1>
+      {sub && <p>{sub}</p>}
+    </div>
+    {actions && <div className="page-head-actions">{actions}</div>}
+  </header>
 );

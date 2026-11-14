@@ -12,19 +12,20 @@ export function hueForAngle(angle: number): number {
 }
 
 export function folderColor(hue: number, depth: number, light = false): string {
+  // Soft, glassy tones that sit with the rest of the app; deeper rings get lighter and calmer.
   if (light) {
-    const l = Math.max(0.52 - (depth - 1) * 0.015, 0.44) + (depth - 1) * 0.05;
-    const s = Math.max(0.72 - (depth - 1) * 0.05, 0.5);
-    return hsl(hue, s, Math.min(l, 0.75));
+    const l = Math.min(0.6 + (depth - 1) * 0.05, 0.82);
+    const s = Math.max(0.68 - (depth - 1) * 0.06, 0.4);
+    return hsl(hue, s, l);
   }
-  const l = Math.min(0.60 + (depth - 1) * 0.045, 0.80);
-  const s = 0.98;
+  const l = Math.min(0.6 + (depth - 1) * 0.04, 0.76);
+  const s = Math.max(0.72 - (depth - 1) * 0.05, 0.45);
   return hsl(hue, s, l);
 }
 
 export function fileColor(depth: number, light = false): string {
-  if (light) return hsl(225, 0.04, Math.max(0.6 - (depth - 1) * 0.05, 0.4));
-  return hsl(225, 0.04, Math.min(0.4 + (depth - 1) * 0.07, 0.7));
+  if (light) return hsl(225, 0.12, Math.min(0.78 + (depth - 1) * 0.03, 0.88));
+  return hsl(225, 0.08, Math.min(0.34 + (depth - 1) * 0.05, 0.56));
 }
 
 /** A file in the block view: a quiet shade of its folder's hue rather than flat grey. */

@@ -5,7 +5,7 @@ import { api, errorText } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
 import { clusterGroups, junkToGroups } from '../../lib/programs';
 import { ClusterBrowser } from '../ClusterBrowser';
-import { Empty, Spinner } from '../ui';
+import { Empty, Spinner, GlassFolder } from '../ui';
 import type { JunkItem, StagedItem } from '../../types';
 
 /** "3 mo old", "2 yr old": how long since the folder last changed. */
@@ -53,16 +53,17 @@ export const JunkPage: React.FC = () => {
   if (!items.length) return <Empty icon={<Sparkles className="w-6 h-6" />} title="No junk found" body="No dependencies, build files, caches, logs or installers over 1 MB in this scan." />;
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll h-full overflow-y-auto">
       <div className="max-w-[1180px] mx-auto px-8 pt-7 pb-10">
-        <header className="flex items-end justify-between gap-4 mb-6">
-          <div>
+        <header className="page-head">
+          <GlassFolder color="#5b8cff" mood="wobble" />
+          <div className="page-head-text">
             <h1 className="text-[28px] font-bold tracking-tight leading-none">Junk</h1>
             <p className="text-[13px] mt-2" style={{ color: 'var(--muted)' }}>
               <strong className="tnum" style={{ color: 'var(--text)' }}>{formatBytes(total)}</strong> in {items.length} places from your last disk scan, sorted by program. Ticked items go to the Collector below.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="page-head-actions">
             <label className="relative">
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--dim)' }} />
               <input className="input !pl-8 !w-56 !rounded-full !py-1.5 !text-[12.5px]" placeholder="Filter by project or path" value={q} onChange={(e) => setQ(e.target.value)} />

@@ -6,7 +6,7 @@ import { Sparkles, Plus, Check, Eye, ChevronDown, ChevronLeft, ChevronRight, Cop
 import { useStore, useCollectedSelection } from '../../store';
 import { api, errorText, onCodexEvent } from '../../lib/api';
 import { formatBytes, shortPath, formatDate, uid } from '../../lib/format';
-import { Empty, SegmentedControl, Spinner } from '../ui';
+import { Empty, SegmentedControl, Spinner, GlassFolder } from '../ui';
 import { extractSuggestions } from '../Assistant';
 import { age } from './Junk';
 import type { DupGroup, RemnantGroup, RemnantMember, StagedItem, Suggestion } from '../../types';
@@ -57,10 +57,11 @@ export const SuggestionsPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>('ai');
   const leftoverBytes = (remnants?.groups ?? []).reduce((a, g) => a + g.total, 0);
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll h-full overflow-y-auto">
       <div className="max-w-[1000px] mx-auto px-8 pt-7 pb-8">
-        <header className="flex items-end justify-between gap-4 mb-6">
-          <div>
+        <header className="page-head">
+          <GlassFolder color="#2fbf86" mood="wobble" />
+          <div className="page-head-text">
             <h1 className="text-[26px] font-bold tracking-tight leading-none">Suggestions</h1>
             <p className="text-[13px] mt-2" style={{ color: 'var(--muted)' }}>Things worth a second look that aren’t obvious junk.</p>
           </div>
