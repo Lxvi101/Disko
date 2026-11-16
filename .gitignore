@@ -20,4 +20,3 @@ ChatGPT Image*.png
 .private/
 .DS_Store
 tests/__pycache__/
-legacy/macbook-deep-clean/
