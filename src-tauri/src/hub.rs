@@ -304,7 +304,7 @@ impl Hub {
 
     /// After loading a snapshot without rescanning, ask the engine for the matched folders' totals.
     fn rematch_from_snapshot(&self) {
-        for m in self.engine.matched_at(&["/".to_string()]) {
+        for m in self.engine.matched_under(None) {
             self.on_matched(m);
         }
     }

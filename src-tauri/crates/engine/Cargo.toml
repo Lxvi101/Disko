@@ -1,0 +1,13 @@
+[package]
+name = "disko-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Disko's one whole-disk scan: in-memory tree, snapshot, FSEvents live updates, volume accounting"
+
+[dependencies]
+disko-core = { path = "../core" }
+libc.workspace = true
+rayon.workspace = true
+plist.workspace = true
+zstd = { version = "0.13", default-features = false }
