@@ -20,6 +20,8 @@ export interface SelItem {
   icon?: string;
   category?: Category;
   safety: Safety;
+  /** It goes to the Trash (Undo); otherwise it's deleted or removed by its tool (simctl…). */
+  trash?: boolean;
   /** Removing it can't be undone (emptying the Trash). Needs press-and-hold. */
   permanent?: boolean;
   busy?: string;
@@ -173,6 +175,9 @@ export const useStore = create<State>((set, get) => ({
     set({ boot, volume: boot.volume });
     get().refreshClutter();
     get().refreshMemory();
+    // Measure apps and agent sessions in the background so their pages open instantly.
+    window.setTimeout(() => { if (!get().apps) get().refreshApps(); }, 4000);
+    window.setTimeout(() => { if (!get().sessions) get().refreshSessions(); }, 9000);
   },
 
   go: (section) => {
@@ -221,11 +226,11 @@ export const useStore = create<State>((set, get) => ({
       sel.delete(it.key);
       for (const p of it.paths) gone.set(p, lookupBytes(s.spaceTree, p) ?? it.bytes / it.paths.length);
       if (it.id) { delete findings[it.id]; pending.add(it.id); }
-      if (it.safety === 'safe' || it.permanent) deleted += it.bytes;
+      if (!it.trash || it.permanent) deleted += it.bytes;
     }
     // Findings fully covered by removed paths go too (e.g. removing a folder from the map).
     for (const f of Object.values(findings)) {
-      if (f.paths.every((p) => [...gone.keys()].some((g) => p === g || p.startsWith(g + '/')))) delete findings[f.id];
+      if (f.paths.length && f.paths.every((p) => [...gone.keys()].some((g) => p === g || p.startsWith(g + '/')))) delete findings[f.id];
     }
     const appPaths = todo.filter((i) => i.kind === 'app').map((i) => i.paths[0]);
     const apps = s.apps?.filter((a) => !appPaths.includes(a.path)) ?? null;
@@ -374,16 +379,17 @@ export const sel = {
   finding: (f: Finding): SelItem => ({
     key: `f:${f.id}`, kind: 'finding', id: f.id, paths: f.paths, bytes: f.bytes, title: f.title, icon: f.icon,
     category: f.category, safety: f.safety, permanent: f.category === 'trash', busy: f.busy,
+    trash: f.action.type === 'trash' || (f.safety === 'review' && f.action.type === 'delete'),
   }),
   node: (n: TreeNode): SelItem => ({
     key: `p:${n.path}`, kind: 'path', paths: [n.path], bytes: n.bytes, title: n.name, category: n.clutter,
-    safety: 'review', permanent: n.clutter === 'trash' && n.path.includes('/.Trash/'),
+    safety: 'review', trash: true, permanent: n.clutter === 'trash' && n.path.includes('/.Trash/'),
   }),
   app: (a: AppInfo): SelItem => ({
     key: `a:${a.path}`, kind: 'app', paths: [a.path, ...a.data_paths], bytes: a.app_bytes + a.data_bytes, title: a.name,
-    icon: a.icon, safety: 'review', busy: a.running ? `${a.name} is open` : undefined,
+    icon: a.icon, safety: 'review', trash: true, busy: a.running ? `${a.name} is open` : undefined,
   }),
   paths: (key: string, title: string, paths: string[], bytes: number, icon?: string): SelItem => ({
-    key, kind: 'path', paths, bytes, title, icon, category: 'agent-data', safety: 'review',
+    key, kind: 'path', paths, bytes, title, icon, category: 'agent-data', safety: 'review', trash: true,
   }),
 };

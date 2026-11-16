@@ -17,7 +17,7 @@ export const SelectionBar: React.FC = () => {
   const total = items.reduce((a, i) => a + i.bytes, 0);
   const t = splitBytes(total);
   const permanent = items.some((i) => i.permanent);
-  const allSafe = items.every((i) => i.safety === 'safe');
+  const allTrash = items.every((i) => i.trash);
   return (
     <AnimatePresence>
       {items.length > 0 && (
@@ -45,7 +45,7 @@ export const SelectionBar: React.FC = () => {
             <HoldButton className="btn-lg" onDone={() => remove(items)}><Trash2 size={18} /> Hold to delete forever</HoldButton>
           ) : (
             <button className="btn btn-primary btn-lg" onClick={() => remove(items)}>
-              <Trash2 size={18} /> {allSafe ? 'Remove' : 'Move to Trash'}
+              <Trash2 size={18} /> {allTrash ? 'Move to Trash' : 'Remove'}
             </button>
           )}
         </motion.div>

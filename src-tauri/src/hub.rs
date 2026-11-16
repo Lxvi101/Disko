@@ -555,6 +555,27 @@ impl Hub {
         }
         if !result.removed.is_empty() {
             disko_apps::storage::invalidate();
+            // A clutter finding whose tool command names something just removed from an app page
+            // (`simctl delete <udid> …`) would fail now; drop it until the probes see it again.
+            let gone_args: HashSet<String> = findings
+                .iter()
+                .filter(|f| storage_ids.contains(&f.id) && result.removed.contains(&f.id))
+                .filter_map(|f| match &f.action {
+                    disko_core::Action::Command { argv, .. } => argv.last().cloned(),
+                    _ => None,
+                })
+                .collect();
+            if !gone_args.is_empty() {
+                let stale: Vec<String> = self
+                    .findings
+                    .read()
+                    .unwrap()
+                    .values()
+                    .filter(|f| matches!(&f.action, disko_core::Action::Command { argv, .. } if argv.iter().any(|a| gone_args.contains(a))))
+                    .map(|f| f.id.clone())
+                    .collect();
+                self.drop_findings(&stale);
+            }
         }
         self.after_removal(&findings, &result);
         disko_apps::size::invalidate(None);

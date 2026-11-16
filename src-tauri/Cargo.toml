@@ -1,6 +1,6 @@
 [package]
 name = "disko"
-version = "1.0.0"
+version = "1.0.1"
 description = "Disko: get your Mac back to factory fresh"
 authors = ["Levi B"]
 license = "MIT"

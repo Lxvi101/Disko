@@ -31,15 +31,22 @@ export const Apps: React.FC = () => {
   return (
     <div className="scroll h-full px-7 pb-32">
       <div className="flex items-end gap-6 pb-6 pt-1">
-        <div>
-          <div className="flex items-baseline gap-2">
-            <span className="hero-num text-[64px] leading-[0.9]">{t.value}</span>
-            <span className="num unit text-[24px]">{t.unit}</span>
+        {apps ? (
+          <div>
+            <div className="flex items-baseline gap-2">
+              <span className="hero-num text-[64px] leading-[0.9]">{t.value}</span>
+              <span className="num unit text-[24px]">{t.unit}</span>
+            </div>
+            <div className="text-[16px] font-medium muted mt-2.5">
+              in {sorted.length} apps{idle > 0 && <span className="dim"> · {idle} unused for 3 months</span>}
+            </div>
           </div>
-          <div className="text-[16px] font-medium muted mt-2.5">
-            in {sorted.length} apps{idle > 0 && <span className="dim"> · {idle} unused for 3 months</span>}
+        ) : (
+          <div>
+            <span className="h-[58px] w-[200px] rounded-2xl shimmer inline-block" />
+            <div className="text-[16px] font-medium muted mt-2.5">Measuring your apps…</div>
           </div>
-        </div>
+        )}
         <div className="flex-1" />
         <div className="no-drag seg rounded-full p-1 flex gap-0.5">
           {(['size', 'used'] as Sort[]).map((s) => (
