@@ -224,6 +224,12 @@ pub struct CleanResult {
     pub failed: Vec<CleanFailure>,
     /// Skipped because they're in use or on the keep list.
     pub skipped: Vec<CleanFailure>,
+    /// Paths removed permanently (rebuildable data, or root-owned items removed with a password).
+    #[serde(default)]
+    pub deleted: Vec<String>,
+    /// Short notes for the user ("Adobe apps uninstall with Adobe's own uninstaller").
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

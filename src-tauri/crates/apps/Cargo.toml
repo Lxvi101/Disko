@@ -1,0 +1,15 @@
+[package]
+name = "disko-apps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Installed apps with their data, uninstall, and coding-agent sessions for Disko"
+
+[dependencies]
+disko-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+plist.workspace = true
+libc.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }

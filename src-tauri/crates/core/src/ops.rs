@@ -58,8 +58,7 @@ fn trash_native(path: &Path) -> Result<PathBuf, String> {
     let url = NSURL::fileURLWithPath(&s);
     let fm = NSFileManager::defaultManager();
     let mut out: Option<Retained<NSURL>> = None;
-    // SAFETY: plain Foundation call with valid objects; `out` receives an autoreleased URL.
-    let res = unsafe { fm.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out)) };
+    let res = fm.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out));
     match res {
         Ok(()) => {
             let to = out.and_then(|u| u.path()).map(|p| PathBuf::from(p.to_string())).unwrap_or_default();
