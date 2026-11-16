@@ -1,0 +1,16 @@
+[package]
+name = "disko-clutter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What counts as clutter on a Mac, how Disko finds it, and how it removes it"
+
+[dependencies]
+disko-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+rayon.workspace = true
+plist.workspace = true
+sha2 = "0.10"
+zip = { version = "9", default-features = false, features = ["deflate"] }
