@@ -1,0 +1,13 @@
+[package]
+name = "disko-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared types and safe file operations for Disko"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSFileManager", "NSURL", "NSError", "NSString"] }

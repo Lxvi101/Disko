@@ -1,7 +1,7 @@
 [package]
 name = "disko"
-version = "0.6.1"
-description = "Disko — disk space visualizer and Codex cleanup assistant"
+version = "1.0.0"
+description = "Disko: get your Mac back to factory fresh"
 authors = ["Levi B"]
 license = "MIT"
 edition = "2021"
@@ -27,3 +27,19 @@ libc = "0.2"
 plist = "1"
 tauri-plugin-updater = "2.12.0"
 tauri-plugin-process = "2.3.1"
+
+[workspace]
+members = [".", "crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+rayon = "1"
+plist = "1"
