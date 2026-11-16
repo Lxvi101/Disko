@@ -253,6 +253,21 @@ pub fn mcp_cli() -> i32 {
     code
 }
 
+/// `Disko --json apps|sessions`: print that inventory as JSON (for debugging and scripts).
+pub fn json_cli(args: &[String]) -> i32 {
+    let what = args.iter().skip_while(|a| *a != "--json").nth(1).map(String::as_str).unwrap_or("");
+    let v = match what {
+        "apps" => json!(disko_apps::apps()),
+        "sessions" => json!(disko_apps::sessions()),
+        _ => {
+            eprintln!("usage: Disko --json apps|sessions");
+            return 2;
+        }
+    };
+    println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+    0
+}
+
 /// `Disko --bench [--out FILE]`: one full scan plus all probes, then a JSON summary on stdout
 /// (time, files, clutter by category). Read-only.
 pub fn bench_cli(args: &[String]) -> i32 {

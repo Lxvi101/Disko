@@ -8,5 +8,8 @@ fn main() {
     if args.iter().any(|a| a == "--bench") {
         std::process::exit(disko_lib::bench_cli(&args));
     }
+    if args.iter().any(|a| a == "--json") {
+        std::process::exit(disko_lib::json_cli(&args));
+    }
     disko_lib::run();
 }
