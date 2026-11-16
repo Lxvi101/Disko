@@ -297,7 +297,7 @@ pub fn speech(c: &Clutter) -> Vec<Finding> {
 pub fn texlive(c: &Clutter) -> Vec<Finding> {
     let mut out = vec![];
     for (root, user) in [(c.env.sys("/usr/local/texlive"), false), (c.env.home.join("Library/texlive"), true)] {
-        let mut years: Vec<(Vec<u64>, PathBuf)> = child_dirs(&root).into_iter().filter_map(|p| Some((parse_version(&name_of(&p)).filter(|v| v[0] > 2000)?, p))).collect();
+        let mut years: Vec<(Vec<u64>, PathBuf)> = child_dirs(&root).into_iter().filter(|p| { let n = name_of(p); n.len() == 4 && n.bytes().all(|b| b.is_ascii_digit()) }).filter_map(|p| Some((parse_version(&name_of(&p)).filter(|v| v[0] > 2000)?, p))).collect();
         if years.len() < 2 {
             continue;
         }

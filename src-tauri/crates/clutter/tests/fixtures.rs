@@ -199,12 +199,12 @@ fn pattern_rules_match_in_walk_and_probe_with_one_id() {
 #[test]
 fn probes_find_versions_leftovers_and_trash() {
     let fx = Fx::new("probes");
-    // A tool installed as versions with a launcher symlink.
-    fx.file(".local/share/tool/versions/1.0.0", 2 * MB);
-    let cur = fx.file(".local/share/tool/versions/2.0.0", 2 * MB);
-    fx.file(".local/share/tool/versions/3.0.0-beta", 2 * MB);
+    // Claude Code installed as versions with a launcher symlink.
+    fx.file(".local/share/claude/versions/1.0.0", 2 * MB);
+    let cur = fx.file(".local/share/claude/versions/2.0.0", 2 * MB);
+    fx.file(".local/share/claude/versions/3.0.0-beta", 2 * MB);
     fx.dir(".local/bin");
-    std::os::unix::fs::symlink(&cur, fx.home.join(".local/bin/tool")).unwrap();
+    std::os::unix::fs::symlink(&cur, fx.home.join(".local/bin/claude")).unwrap();
     // nvm with default 22.
     fx.file(".nvm/versions/node/v20.1.0/bin/node", 2 * MB);
     fx.file(".nvm/versions/node/v22.3.0/bin/node", 2 * MB);
@@ -237,6 +237,7 @@ fn probes_find_versions_leftovers_and_trash() {
     assert_eq!(rel.len(), 1, "{:#?}", rel);
     assert_eq!(rel[0].paths.len(), 1);
     assert!(rel[0].paths[0].ends_with("1.0.0"), "current and newer stay: {:?}", rel[0].paths);
+    assert_eq!(rel[0].title, "Claude Code");
 
     let node = get("versions.node");
     assert_eq!(node.len(), 1);
@@ -370,9 +371,146 @@ fn clean_runs_commands_once_and_review_goes_to_trash() {
     assert_eq!(r.trashed.len(), 1, "{:?}", r);
     let t = &r.trashed[0];
     assert_eq!(t.from, rv.to_string_lossy());
+    // Moved to the Trash is not freed: only the command's 2 MB count.
+    assert!(r.freed < 3 * MB as u64, "{:?}", r);
+    assert!(t.bytes >= MB as u64);
+    assert!(r.deleted.contains(&d.to_string_lossy().to_string()), "{:?}", r);
     // Put our own temp file back out of the real Trash and remove it.
     disko_core::ops::put_back(Path::new(&t.to), &rv).unwrap();
     assert!(rv.exists());
+}
+
+fn releases_of(fx: &Fx) -> Vec<Finding> {
+    probes::versions::releases(&fx.clutter(vec![], vec![], vec![]))
+}
+
+#[test]
+fn releases_never_touch_personal_folders_or_unknown_roots() {
+    let fx = Fx::new("rel-personal");
+    // The reproduced case: ~/bin/report → ~/Work/2025/report/bin/report.
+    let target = fx.file("Work/2025/report/bin/report", MB);
+    let photos = fx.file("Work/2019-photos.zip", 2 * MB);
+    let taxes = fx.file("Work/2023 Taxes/return.pdf", 2 * MB);
+    let clients = fx.file("Work/2024 Clients/list.xlsx", 2 * MB);
+    fx.dir("bin");
+    std::os::unix::fs::symlink(&target, fx.home.join("bin/report")).unwrap();
+    // The same shape under Documents, and an unknown tool with release-like names.
+    let doc = fx.file("Documents/Projects/2.0.0/bin/tool", MB);
+    fx.file("Documents/Projects/1.0.0/bin/tool", 2 * MB);
+    std::os::unix::fs::symlink(&doc, fx.home.join("bin/doctool")).unwrap();
+    let unknown = fx.file(".local/share/sometool/versions/2.0.0", MB);
+    fx.file(".local/share/sometool/versions/1.0.0", 2 * MB);
+    fx.dir(".local/bin");
+    std::os::unix::fs::symlink(&unknown, fx.home.join(".local/bin/sometool")).unwrap();
+    assert!(releases_of(&fx).is_empty(), "{:#?}", releases_of(&fx));
+    assert!(photos.exists() && taxes.exists() && clients.exists());
+}
+
+#[test]
+fn releases_need_the_same_layout_as_the_one_in_use() {
+    let fx = Fx::new("rel-layout");
+    // Codex: releases/<v>/bin/codex, `current` → newest.
+    let rel = ".codex/packages/standalone/releases";
+    let cur = fx.dir(&format!("{}/0.169.0-aarch64-apple-darwin", rel));
+    fx.file(&format!("{}/0.169.0-aarch64-apple-darwin/bin/codex", rel), MB);
+    fx.file(&format!("{}/0.167.1-aarch64-apple-darwin/bin/codex", rel), 2 * MB);
+    // Version-named, older, but not shaped like a release: a folder without bin/codex, and a file.
+    fx.file(&format!("{}/0.150.0-notes/readme.txt", rel), 2 * MB);
+    fx.file(&format!("{}/0.140.0-backup.tar", rel), 2 * MB);
+    std::os::unix::fs::symlink(&cur, fx.home.join(".codex/packages/standalone/current")).unwrap();
+    // Ardia: `current` → 0.2.46 beside non-release folders.
+    let ardia = "Library/Application Support/Ardia/CLI";
+    fx.file(&format!("{}/0.2.46/bin/ardia", ardia), MB);
+    fx.file(&format!("{}/0.2.40/bin/ardia", ardia), 2 * MB);
+    fx.file(&format!("{}/cua-driver/bin/x", ardia), 2 * MB);
+    fx.file(&format!("{}/Usage/log", ardia), 2 * MB);
+    std::os::unix::fs::symlink("0.2.46", fx.home.join(format!("{}/current", ardia))).unwrap();
+    // Claude Code: each release is the executable itself; a folder named like a version isn't one.
+    let claude = fx.file(".local/share/claude/versions/2.1.325", MB);
+    fx.file(".local/share/claude/versions/2.1.321", 2 * MB);
+    fx.file(".local/share/claude/versions/2.1.300/keep.txt", 2 * MB);
+    fx.dir(".local/bin");
+    std::os::unix::fs::symlink(&claude, fx.home.join(".local/bin/claude")).unwrap();
+
+    let mut found = releases_of(&fx);
+    found.sort_by(|a, b| a.title.cmp(&b.title));
+    let summary: Vec<(String, Vec<String>)> = found.iter().map(|f| (f.title.clone(), f.paths.iter().map(|p| Path::new(p).file_name().unwrap().to_string_lossy().to_string()).collect())).collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("Ardia".to_string(), vec!["0.2.40".to_string()]),
+            ("Claude Code".to_string(), vec!["2.1.321".to_string()]),
+            ("Codex CLI".to_string(), vec!["0.167.1-aarch64-apple-darwin".to_string()]),
+        ]
+    );
+}
+
+#[test]
+fn admin_items_are_skipped_unless_safe_and_delete() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = Fx::new("admin");
+    let locked = fx.dir("locked");
+    let review = fx.file("locked/Xcode.app/x", MB).parent().unwrap().to_path_buf();
+    let trash = fx.file("locked/texlive-2023/x", MB).parent().unwrap().to_path_buf();
+    // Our parent folder is not writable: removing needs an administrator.
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    let mut a = fake("t.review", vec![review.clone()], Safety::Review, Action::Delete);
+    a.admin = true;
+    let mut b = fake("t.trash", vec![trash.clone()], Safety::Safe, Action::Trash);
+    b.admin = true;
+    let c = fx.clutter(vec![], vec![], vec![]);
+    let r = c.clean(&[a.clone(), b.clone()], &|_| false, &mut |_, _, _| {});
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(review.exists() && trash.exists());
+    assert!(r.removed.is_empty() && r.trashed.is_empty() && r.deleted.is_empty() && r.freed == 0, "{:?}", r);
+    for p in [&review, &trash] {
+        let s = r.skipped.iter().find(|s| s.path == p.to_string_lossy()).expect("skipped");
+        assert_eq!(s.error, disko_clutter::clean::NEEDS_ADMIN);
+    }
+}
+
+#[test]
+fn shared_commands_share_failure_and_keep() {
+    let fx = Fx::new("shared");
+    // A failing command shared by two findings: both fail, neither is removed.
+    let x = fx.file("c/x/f", MB).parent().unwrap().to_path_buf();
+    let y = fx.file("c/y/f", MB).parent().unwrap().to_path_buf();
+    let fail = Action::Command { argv: vec!["/usr/bin/false".into()], label: "false".into() };
+    let f1 = fake("t.f1", vec![x.clone()], Safety::Safe, fail.clone());
+    let f2 = fake("t.f2", vec![y.clone()], Safety::Safe, fail);
+    let c = fx.clutter(vec![], vec![], vec![]);
+    let r = c.clean(&[f1.clone(), f2.clone()], &|_| false, &mut |_, _, _| {});
+    assert!(r.removed.is_empty(), "{:?}", r);
+    assert!(r.failed.iter().any(|f| f.path == x.to_string_lossy()) && r.failed.iter().any(|f| f.path == y.to_string_lossy()), "{:?}", r);
+    assert_eq!(r.freed, 0);
+
+    // A command that removes both: the second finding's path is kept, so it runs for neither.
+    let rm = Action::Command { argv: vec!["/bin/rm".into(), "-rf".into(), x.to_string_lossy().to_string(), y.to_string_lossy().to_string()], label: "rm".into() };
+    let g1 = fake("t.g1", vec![x.clone()], Safety::Safe, rm.clone());
+    let g2 = fake("t.g2", vec![y.clone()], Safety::Safe, rm);
+    let ys = y.to_string_lossy().to_string();
+    let r = c.clean(&[g1.clone(), g2.clone()], &|p| p == ys, &mut |_, _, _| {});
+    assert!(x.exists() && y.exists());
+    assert!(r.removed.is_empty() && r.freed == 0, "{:?}", r);
+    assert!(r.skipped.iter().any(|s| s.path == x.to_string_lossy()) && r.skipped.iter().any(|s| s.path == ys));
+
+    // Nothing kept: it runs once and both are removed, with their paths recorded.
+    let r = c.clean(&[g1.clone(), g2.clone()], &|_| false, &mut |_, _, _| {});
+    assert!(!x.exists() && !y.exists());
+    assert!(r.removed.contains(&g1.id) && r.removed.contains(&g2.id));
+    assert_eq!(r.deleted.len(), 2, "{:?}", r);
+    assert!(r.freed >= 2 * MB as u64);
+}
+
+#[test]
+fn wrangler_state_is_not_build_output() {
+    let fx = Fx::new("wrangler");
+    fx.file("dev/site/package.json", 10);
+    fx.file("dev/site/wrangler.toml", 10);
+    fx.file("dev/site/.wrangler/state/v3/d1/db.sqlite", 2 * MB);
+    fx.file("dev/site/.wrangler/tmp/bundle.js", 2 * MB);
+    let c = fx.clutter(vec![], vec![], vec![]);
+    assert!(fx.walk(&c).values().all(|f| !f.paths.iter().any(|p| p.contains(".wrangler"))));
 }
 
 #[test]
@@ -409,4 +547,18 @@ fn build_output_parked_in_dot_cache_is_split_from_the_rest() {
     assert!(rest[0].paths.iter().all(|p| !p.contains("target-a")));
     // The walk doesn't match inside: the folder is claimed by the probe.
     assert!(fx.walk(&c).values().all(|f| !f.paths.iter().any(|p| p.contains("/.cache/"))));
+}
+
+#[test]
+fn texlive_years_are_four_digit_folders_only() {
+    let fx = Fx::new("texlive");
+    fx.file("Library/texlive/2023/x", 2 * MB);
+    fx.file("Library/texlive/2024/x", 2 * MB);
+    fx.file("Library/texlive/2022 Taxes/x", 2 * MB);
+    fx.file("Library/texlive/2021-photos.zip", 2 * MB);
+    let c = fx.clutter(vec![], vec![], vec![]);
+    let found = probes::deep::texlive(&c);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].paths.len(), 1);
+    assert!(found[0].paths[0].ends_with("/2023"), "{:?}", found[0].paths);
 }

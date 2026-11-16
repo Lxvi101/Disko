@@ -384,63 +384,95 @@ fn bin_dirs(c: &Clutter) -> Vec<PathBuf> {
     vec![h.join(".local/bin"), h.join("bin"), c.env.sys("/usr/local/bin"), h.join(".bun/bin"), h.join(".cargo/bin")]
 }
 
-/// Directories that are already handled elsewhere or are app internals.
-fn skip_root(c: &Clutter, root: &Path) -> bool {
-    let h = &c.env.home;
-    let r = s(root);
-    r.contains("/Cellar/") || r.contains("/Caskroom/") || r.contains(".app/") || root.starts_with(h.join(".nvm")) || root.starts_with(h.join(".rustup")) || root.starts_with(h.join(".pyenv")) || root.starts_with(h.join(".volta"))
+/// A tool that installs each release side by side in one folder and points a launcher at one.
+/// Only these exact folders are ever looked at: a launcher pointing anywhere else (a script in
+/// `~/Work/2025/…`) produces nothing.
+struct ReleaseRoot {
+    title: &'static str,
+    /// The folder holding one entry per release, relative to home.
+    root: &'static str,
+    /// `current`-style links (relative to home) that also mark the release in use.
+    pointers: &'static [&'static str],
+    /// Where the executable is inside a release folder; the first one the release in use has is
+    /// the layout every older release must share. Empty: each release is the executable file
+    /// itself.
+    exe: &'static [&'static str],
 }
 
-/// The versions folder a resolved launcher target lives in: the nearest ancestor named like a
-/// version whose parent holds at least one other version.
-fn versions_root(target: &Path) -> Option<(PathBuf, PathBuf, Vec<u64>)> {
-    for a in target.ancestors().take(6) {
-        let Some(v) = parse_version(&name_of(a)) else { continue };
-        let parent = a.parent()?;
-        let siblings = child_dirs(parent).into_iter().chain(children(parent).into_iter().filter(|p| crate::util::is_file(p))).filter(|p| p != a && parse_version(&name_of(p)).is_some()).count();
-        if siblings >= 1 {
-            return Some((parent.to_path_buf(), a.to_path_buf(), v));
-        }
+const RELEASE_ROOTS: &[ReleaseRoot] = &[
+    ReleaseRoot { title: "Claude Code", root: ".local/share/claude/versions", pointers: &[], exe: &[] },
+    ReleaseRoot { title: "Codex CLI", root: ".codex/packages/standalone/releases", pointers: &[".codex/packages/standalone/current"], exe: &["bin/codex"] },
+    ReleaseRoot { title: "Codex CLI", root: ".codex/packages/app-server-daemon/releases", pointers: &[".codex/packages/app-server-daemon/current"], exe: &["bin/codex"] },
+    ReleaseRoot { title: "Cursor Agent", root: ".local/share/cursor-agent/versions", pointers: &[], exe: &["cursor-agent"] },
+    ReleaseRoot { title: "GitKraken CLI", root: ".gitkraken/cli", pointers: &[".gitkraken/cli/current"], exe: &["gk", "bin/gk"] },
+    ReleaseRoot { title: "Ardia", root: "Library/Application Support/Ardia/CLI", pointers: &["Library/Application Support/Ardia/CLI/current"], exe: &["bin/ardia"] },
+];
+
+/// Personal folders: nothing in them is ever an old release, whatever a launcher points at.
+const PERSONAL: &[&str] = &["Documents", "Desktop", "Downloads", "Pictures", "Movies", "Music", "Library/Mobile Documents", "Library/CloudStorage"];
+
+/// A release name: at least "major.minor" ("2.1.325", "0.169.0-aarch64-apple-darwin",
+/// "2026.10.01-e373342"), no spaces. "2025", "2023 Taxes" or "2019-photos.zip" are not.
+fn release_version(name: &str) -> Option<Vec<u64>> {
+    if name.contains(char::is_whitespace) || name.contains('(') {
+        return None;
     }
-    None
+    parse_version(name).filter(|v| v.len() >= 2)
 }
 
-/// Superseded releases: anything installed in a versions folder that a launcher (a symlink on
-/// PATH, or a `current` pointer) no longer points into, and that is older than what it points to.
-/// Covers Claude Code, Codex, cursor-agent, GitKraken CLI, Ardia and any tool installed the same way.
+/// Superseded releases of the known tools in [`RELEASE_ROOTS`]: releases older than the one a
+/// launcher (a symlink on PATH, or a `current` pointer) points into, with the same layout as it,
+/// and not running.
 pub fn releases(c: &Clutter) -> Vec<Finding> {
     let h = &c.env.home;
-    let mut pointers: Vec<(String, PathBuf)> = vec![];
+    let mut links: Vec<PathBuf> = vec![];
     for d in bin_dirs(c) {
         for p in children(&d) {
             if fs::symlink_metadata(&p).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-                pointers.push((name_of(&p), p));
+                links.push(p);
             }
         }
     }
-    for (label, p) in [("codex", ".codex/packages/standalone/current"), ("codex daemon", ".codex/packages/app-server-daemon/current"), ("gk", ".gitkraken/cli/current")] {
-        pointers.push((label.into(), h.join(p)));
-    }
-    // root → (label, current versions in use)
-    let mut roots: BTreeMap<PathBuf, (String, Vec<(PathBuf, Vec<u64>)>)> = BTreeMap::new();
-    for (label, p) in &pointers {
-        let Ok(target) = fs::canonicalize(p) else { continue };
-        let Some((root, current, v)) = versions_root(&target) else { continue };
-        if skip_root(c, &root) {
-            continue;
-        }
-        let e = roots.entry(root).or_insert_with(|| (label.clone(), vec![]));
-        e.1.push((current, v));
-    }
+    let targets: Vec<PathBuf> = links.iter().filter_map(|p| fs::canonicalize(p).ok()).collect();
     let procs = c.procs();
     let mut out = vec![];
-    for (root, (label, current)) in roots {
-        let newest_current = current.iter().map(|x| x.1.clone()).max().unwrap_or_default();
+    for rr in RELEASE_ROOTS {
+        let root = h.join(rr.root);
+        if PERSONAL.iter().any(|p| root.starts_with(h.join(p))) || !is_dir(&root) {
+            continue;
+        }
+        // The folder itself must not be reached through a link.
+        if fs::canonicalize(&root).ok().as_deref() != Some(root.as_path()) {
+            continue;
+        }
+        let mut current: Vec<(PathBuf, Vec<u64>)> = vec![];
+        let own: Vec<PathBuf> = rr.pointers.iter().filter_map(|p| fs::canonicalize(h.join(p)).ok()).collect();
+        for t in targets.iter().chain(own.iter()) {
+            let Ok(inside) = t.strip_prefix(&root) else { continue };
+            let Some(first) = inside.components().next() else { continue };
+            let entry = root.join(first);
+            let Some(v) = release_version(&name_of(&entry)) else { continue };
+            if !current.iter().any(|(e, _)| e == &entry) {
+                current.push((entry, v));
+            }
+        }
+        let Some((newest_entry, newest)) = current.iter().max_by(|a, b| a.1.cmp(&b.1)).cloned() else { continue };
+        // The layout of the release in use: a plain executable file, or a folder with the
+        // executable at a known place.
+        let layout: Option<&str> = if rr.exe.is_empty() {
+            crate::util::is_file(&newest_entry).then_some("")
+        } else if is_dir(&newest_entry) {
+            rr.exe.iter().copied().find(|e| crate::util::is_file(&newest_entry.join(e)))
+        } else {
+            None
+        };
+        let Some(layout) = layout else { continue };
+        let same_layout = |p: &Path| if layout.is_empty() { crate::util::is_file(p) } else { is_dir(p) && crate::util::is_file(&p.join(layout)) };
         let old: Vec<PathBuf> = children(&root)
             .into_iter()
-            .filter(|p| !fs::symlink_metadata(p).map(|m| m.file_type().is_symlink()).unwrap_or(true))
-            .filter(|p| parse_version(&name_of(p)).is_some_and(|v| v < newest_current))
+            .filter(|p| release_version(&name_of(p)).is_some_and(|v| v < newest))
             .filter(|p| !current.iter().any(|(cur, _)| cur == p))
+            .filter(|p| same_layout(p))
             .filter(|p| procs.exe_inside(p).is_none() && procs.app_running(p).is_none())
             .collect();
         if old.is_empty() {
@@ -451,15 +483,8 @@ pub fn releases(c: &Clutter) -> Vec<Finding> {
             continue;
         }
         let names: Vec<String> = old.iter().map(|p| name_of(p)).collect();
-        let title = match label.as_str() {
-            "claude" => "Claude Code".to_string(),
-            "codex" | "codex daemon" | "codex-code-mode-host" => "Codex CLI".to_string(),
-            "agent" | "cursor-agent" => "Cursor Agent".to_string(),
-            "gk" => "GitKraken CLI".to_string(),
-            l => crate::util::cap(l),
-        };
         out.push(
-            make("versions.releases", Category::OldVersions, title, "box", old.iter().map(|p| s(p)).collect(), size, Safety::Safe, false, format!("`{}` runs version {}; these older releases beside it aren't used by anything running.", label, version_str(&newest_current)))
+            make("versions.releases", Category::OldVersions, rr.title, "box", old.iter().map(|p| s(p)).collect(), size, Safety::Safe, false, format!("{} runs version {}; these older releases beside it aren't used by anything running.", rr.title, version_str(&newest)))
                 .keyed(&s(&root))
                 .detail(names.join(", ")),
         );
@@ -533,6 +558,18 @@ pub fn extensions(c: &Clutter) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_names_need_major_and_minor() {
+        assert_eq!(release_version("2.1.325"), Some(vec![2, 1, 325]));
+        assert_eq!(release_version("0.169.0-aarch64-apple-darwin"), Some(vec![0, 169, 0]));
+        assert_eq!(release_version("2026.10.01-e373342"), Some(vec![2026, 10, 1]));
+        assert_eq!(release_version("2025"), None);
+        assert_eq!(release_version("2023 Taxes"), None);
+        assert_eq!(release_version("2019-photos.zip"), None);
+        assert_eq!(release_version("1.2 (copy)"), None);
+        assert_eq!(release_version("current"), None);
+    }
 
     #[test]
     fn pins_match_prefixes() {
