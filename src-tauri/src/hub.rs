@@ -262,6 +262,15 @@ impl Hub {
         if self.started.swap(true, Ordering::SeqCst) {
             return;
         }
+        // Disko 0.x kept a ~200 MB scan database per scan in ~/.disko/reports; 1.0 needs none of it.
+        std::thread::spawn(|| {
+            let old = disko_core::paths::home().join(".disko");
+            let reports = old.join("reports");
+            if reports.is_dir() {
+                let _ = ops::delete(&reports);
+            }
+            let _ = std::fs::remove_dir(&old); // only if now empty
+        });
         let age = self.engine.load_snapshot();
         *self.snapshot_age.lock().unwrap() = age;
         if let Some(t) = self.engine.tree(None, 3) {
