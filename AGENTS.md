@@ -17,6 +17,7 @@ Deterministic, evidence-backed rules over guesses.
 | `src-tauri/crates/apps` | Apps with their data and leftovers; coding-agent sessions |
 | `src-tauri/crates/memory` | Keep list, learned rules, routines, community rule pack |
 | `src-tauri/crates/mcp` | MCP server for agents (`Disko --mcp`) |
+| `src-tauri/crates/macos` | App/file icons, Finder, Quick Look, Full Disk Access |
 | `src-tauri/src` | Tauri app: commands and events wiring the crates |
 | `src` | React UI (`src/README.md`) |
 | `rules/` | Community rule pack |

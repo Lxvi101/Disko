@@ -1,0 +1,13 @@
+[package]
+name = "disko-macos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Small macOS helpers for the Disko app: icons, Finder, Quick Look, Full Disk Access"
+
+[dependencies]
+disko-core = { path = "../core" }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSData", "NSDictionary", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphicsContext", "objc2-core-graphics"] }
+objc2-core-graphics = { version = "0.3", features = ["CGImage"] }
