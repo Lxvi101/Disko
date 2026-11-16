@@ -96,6 +96,14 @@ async fn apps() -> Result<Value, String> {
     bg(|| json!(disko_apps::apps())).await
 }
 
+/// One app's storage page (`AppInfo.storage` says which apps have one). Slow-ish (simctl, sizes):
+/// runs off the main thread.
+#[tauri::command]
+async fn app_storage(hub: State<'_, HubState>, path: String) -> Result<Option<disko_apps::AppStorage>, String> {
+    let hub = hub.inner().clone();
+    bg(move || hub.app_storage(&path)).await
+}
+
 #[tauri::command]
 async fn uninstall(hub: State<'_, HubState>, paths: Vec<String>) -> Result<CleanResult, String> {
     let hub = hub.inner().clone();
@@ -223,6 +231,7 @@ pub fn run() {
             clean,
             undo,
             apps,
+            app_storage,
             uninstall,
             sessions,
             memory,

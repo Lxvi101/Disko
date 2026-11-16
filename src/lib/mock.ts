@@ -3,7 +3,7 @@
 // arrive over time, removals that shrink the tree at once, Trash + Undo, apps, agent sessions,
 // memory and MCP clients. Nothing here touches the real disk.
 import type {
-  AgentProject, AgentSession, AgentTool, AppInfo, BootInfo, Category, CleanResult, Events, Finding,
+  AgentProject, AgentSession, AgentTool, AppInfo, AppStorage, BootInfo, Category, CleanResult, Events, Finding,
   HiddenSpace, McpClient, Memory, MemoryOp, ScanProgress, Trashed, TreeNode, VolumeInfo,
 } from './types';
 
@@ -433,6 +433,18 @@ function clean(ids: string[], paths: string[]): CleanResult {
   const res: CleanResult = { freed: 0, removed: [], trashed: [], failed: [], skipped: [] };
   const touched: string[] = [];
   for (const id of ids) {
+    const sf = storageItems.get(id);
+    if (sf && !emitted.has(id)) {
+      if (sf.busy) { res.skipped.push({ path: sf.paths[0] ?? sf.title, error: sf.busy }); continue; }
+      const real = sf.paths.filter((p) => byPath.has(p));
+      removePaths(real, sf.action.type === 'trash' ? 'trash' : 'delete', res);
+      if (sf.action.type !== 'trash') res.freed += sf.bytes;
+      else for (const p of sf.paths.filter((x) => !byPath.has(x))) res.trashed.push({ from: p, to: H(`.Trash/${p.slice(p.lastIndexOf('/') + 1)}`), bytes: sf.bytes / sf.paths.length });
+      removedStorage.add(id);
+      storageItems.delete(id);
+      res.removed.push(id);
+      continue;
+    }
     const f = emitted.get(id);
     if (!f) continue;
     if (f.busy) { f.paths.forEach((p) => res.skipped.push({ path: p, error: f.busy! })); continue; }
@@ -497,8 +509,81 @@ function apps(): AppInfo[] {
       name, bundle_id: `com.example.${name.toLowerCase().replace(/\W/g, '')}`, path: c.path, version: `${(name.length % 7) + 1}.${name.length % 4}`,
       icon: `app:${c.path}`, app_bytes: sizeOf(c, Infinity), data_bytes: data.reduce((s, p) => s + sizeOf(byPath.get(p)!, Infinity), 0), data_paths: data,
       last_used: used, running: ['Google Chrome', 'Slack', 'Claude', 'T3 Code', 'Spotify', 'OrbStack', 'Cursor'].includes(name), apple: APPLE.has(name),
+      storage: name === 'Xcode' || name.startsWith('Adobe ') || ['Google Chrome', 'Slack', 'Discord', 'Visual Studio Code', 'Cursor', 'Claude', 'Figma'].includes(name),
     };
   });
+}
+
+// ---------- app storage pages ----------
+/** Items handed out by `app_storage`, so `clean` can remove them by id. */
+const storageItems = new Map<string, Finding>();
+const removedStorage = new Set<string>();
+function sItem(rule: string, category: Category, title: string, icon: string, paths: string[], bytes: number, ageDays: number, extra: Partial<Finding> = {}): Finding {
+  const safety = extra.safety ?? 'safe';
+  return {
+    id: fid(rule, paths.length ? paths : [title]), rule, category, title, icon, paths, bytes, last_used: NOW - Math.round(ageDays * DAY), safety,
+    action: safety === 'safe' ? { type: 'delete' } : { type: 'trash' }, regrows: safety === 'safe', why: '', ...extra,
+  };
+}
+function appStorage(path: string): AppStorage | null {
+  const name = path.slice(path.lastIndexOf('/') + 1).replace(/\.app$/, '');
+  const groups: AppStorage['groups'] = [];
+  const g = (id: string, title: string, icon: string, items: Finding[], note?: string) => groups.push({ id, title, icon, note, bytes: 0, items });
+  const devs = H('Library/Developer');
+  if (name === 'Xcode') {
+    const sims: [string, string, string, number, number, string?][] = [
+      ['iPhone 17 Pro', 'iphone', 'iOS 26.1', 6.2, 1, 'Booted'], ['iPhone 17', 'iphone', 'iOS 26.1', 3.1, 12], ['iPad Pro 13-inch (M5)', 'tablet', 'iOS 26.1', 2.4, 40],
+      ['iPhone 16 Pro', 'iphone', 'iOS 18.6', 4.8, 160], ['iPhone SE (3rd generation)', 'iphone', 'iOS 18.6', 1.2, 300], ['Apple Watch Series 11 (46mm)', 'watch', 'watchOS 26.1', 0.9, 90],
+      ['Apple TV 4K (3rd generation)', 'tv', 'tvOS 18.4', 0.6, 420], ['Apple Vision Pro', 'vision', 'visionOS 2.4 · runtime not installed', 1.8, 510],
+    ];
+    g('simulators', 'Simulators', 'iphone', sims.map(([n, icon, rt, gb, d, state], i) => {
+      const udid = `${(0x1a2b3c4d + i * 7919).toString(16).toUpperCase()}-0000-4000-8000-00000000000${i}`;
+      return sItem('developer.simulator', 'developer', n, icon, [`${devs}/CoreSimulator/Devices/${udid}`], gb * GB, d, {
+        detail: rt, safety: 'review', regrows: false, action: { type: 'command', argv: ['/usr/bin/xcrun', 'simctl', 'delete', udid], label: 'simctl delete' },
+        busy: state ? 'Running now; shut it down first' : undefined,
+      });
+    }), 'Each simulator\'s test apps and their data go with it. Xcode makes new ones whenever you need them.');
+    const rts: [string, number, number, number][] = [['iOS 26.1', 8.4, 1, 3], ['iOS 18.6', 7.9, 160, 2], ['watchOS 26.1', 4.1, 90, 1], ['tvOS 18.4', 3.6, 420, 1], ['visionOS 26.0', 9.2, 200, 0]];
+    g('runtimes', 'Simulator runtimes', 'disc', rts.map(([n, gb, d, users]) => sItem('extras.simulator-runtime', 'extras', n, 'iphone', [], gb * GB, d, {
+      detail: users === 0 ? 'Used by no simulator' : `Used by ${users} simulator${users === 1 ? '' : 's'}`, safety: 'review', regrows: false,
+      action: { type: 'command', argv: ['/usr/bin/xcrun', 'simctl', 'runtime', 'delete', n], label: 'simctl runtime delete' },
+      busy: n === 'iOS 26.1' ? 'iPhone 17 Pro is running on it' : undefined,
+    })), 'Removing a runtime is permanent; Xcode can download it again.');
+    g('device-support', 'Device support', 'iphone', [['iOS 26.1 (23B85)', 'iPhone18,2', 4.6, 3], ['iOS 18.6.2 (22G100)', 'iPhone16,2', 4.2, 120], ['iOS 18.4 (22E240)', 'iPhone16,2', 4.1, 210], ['watchOS 11.2 (22S100)', 'Watch7,1', 1.3, 260]]
+      .map(([n, model, gb, d]) => sItem('developer.device-support', 'developer', n as string, String(n).startsWith('watch') ? 'watch' : 'iphone', [`${devs}/Xcode/iOS DeviceSupport/${model} ${n}`], (gb as number) * GB, d as number, { detail: model as string })));
+    g('derived-data', 'Build data', 'xcode', [['Disko', 3.4, 0.2], ['MealClub', 5.8, 2], ['Wink', 1.1, 30], ['Old Prototype', 2.2, 400], ['Module cache', 1.6, 1]]
+      .map(([n, gb, d]) => sItem('developer.derived-data', 'build', n as string, 'xcode', [`${devs}/Xcode/DerivedData/${n}-abcdefghijklmnopqrst`], (gb as number) * GB, d as number, { detail: n === 'Old Prototype' ? 'Project no longer exists' : undefined })));
+    g('archives', 'Archives', 'archive', [['MealClub', '2.4 (118)', 0.9, 10], ['MealClub', '2.3 (104)', 0.85, 60], ['Wink', '1.0 (7)', 0.3, 200]]
+      .map(([n, v, gb, d]) => sItem('developer.archive', 'developer', n as string, 'archive', [`${devs}/Xcode/Archives/${v}/${n} ${v}.xcarchive`], (gb as number) * GB, d as number, { detail: v as string, safety: 'review' })));
+    g('caches', 'Caches', 'cache', [['Xcode cache', 1.4], ['Simulator caches', 2.6], ['Test simulator clones', 3.3], ['SwiftUI previews', 0.8], ['Device logs', 0.2]]
+      .map(([n, gb]) => sItem('developer.cache', n === 'Device logs' ? 'logs' : 'cache', n as string, n === 'Device logs' ? 'log' : 'cache', [`${devs}/cache/${n}`], (gb as number) * GB, 3)));
+  } else if (name.startsWith('Adobe ')) {
+    const common = H('Library/Application Support/Adobe/Common');
+    g('media-cache', 'Media caches', 'film', [
+      sItem('cache.adobe-media', 'cache', 'Media cache files', 'film', [`${common}/Media Cache Files`], 38 * GB, 4),
+      sItem('cache.adobe-media', 'cache', 'Media cache database', 'film', [`${common}/Media Cache`], 2.1 * GB, 4),
+      sItem('cache.adobe-media', 'cache', 'Audio waveforms', 'film', [`${common}/Peak Files`], 0.7 * GB, 4),
+      sItem('cache.adobe-disk-cache', 'cache', 'After Effects disk cache', 'film', [H('Library/Caches/Adobe/After Effects/26.5/Disk Cache - mac')], 21 * GB, 9, { detail: 'Version 26.5' }),
+    ], 'Adobe\'s apps make these again when they need them.');
+    g('old-versions', 'Data of older versions', 'archive', [
+      sItem('versions.adobe-data', 'old-versions', 'Adobe Photoshop 2024', `app:${path}`, [H('Library/Application Support/Adobe/Adobe Photoshop 2024')], 1.3 * GB, 500, { detail: 'settings, support files', safety: 'review' }),
+      sItem('versions.adobe-data', 'old-versions', 'Adobe After Effects 24.6', `app:${path}`, [H('Library/Preferences/Adobe/After Effects/24.6')], 0.2 * GB, 420, { detail: 'settings', safety: 'review' }),
+    ]);
+  } else {
+    const icon = `app:${path}`;
+    const busy = ['Google Chrome', 'Slack', 'Claude', 'Cursor'].includes(name) ? `${name} is open; quit it first` : undefined;
+    const sup = H(`Library/Application Support/${name}`);
+    g('caches', 'Caches', 'cache', [['Web cache', 0.9], ['Code cache', 0.3], ['GPU caches', 0.1], ['Update downloads', 0.4]]
+      .map(([n, gb], i) => sItem('cache.electron', 'cache', n as string, icon, [`${sup}/c${i}`], (gb as number) * GB, 1 + i, { busy })));
+    if (name === 'Claude') g('cli-versions', 'Older Claude Code versions', 'terminal', ['2.1.321', '2.1.322'].map((v, i) => sItem('versions.agent-cli', 'old-versions', `Claude Code ${v}`, 'terminal', [H(`.local/share/claude/versions/${v}`)], 0.33 * GB, 8 - i * 3, { regrows: false })));
+  }
+  for (const gr of groups) {
+    gr.items = gr.items.filter((f) => !removedStorage.has(f.id));
+    gr.bytes = gr.items.reduce((a, f) => a + f.bytes, 0);
+    for (const f of gr.items) storageItems.set(f.id, f);
+  }
+  const live = groups.filter((x) => x.items.length);
+  return { app: { name, path, icon: `app:${path}`, version: '26.1', profile: name === 'Xcode' ? 'xcode' : name.startsWith('Adobe ') ? 'adobe' : 'electron' }, bytes: live.reduce((a, x) => a + x.bytes, 0), groups: live };
 }
 
 // ---------- agent sessions ----------
@@ -627,6 +712,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
     case 'clean': return r(clean(args.ids ?? [], args.paths ?? []));
     case 'undo': return r(undo(args.trashed ?? []));
     case 'apps': return r(apps());
+    case 'app_storage': return r(appStorage(String(args.path)));
     case 'uninstall': {
       const paths: string[] = args.paths ?? [];
       const all = paths.flatMap((p) => [p, ...(APP_DATA[p.slice(p.lastIndexOf('/') + 1).replace(/\.app$/, '')] ?? []).filter((d) => byPath.has(d))]);

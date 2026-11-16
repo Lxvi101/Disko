@@ -81,7 +81,7 @@ fn is_uninstaller(name: &str) -> bool {
     ["uninstall", "deinstall", "désinstall", "desinstal", "remover"].iter().any(|k| n.contains(k))
 }
 
-fn read_info(app: &Path) -> Option<(String, Option<String>, Option<String>)> {
+pub(crate) fn read_info(app: &Path) -> Option<(String, Option<String>, Option<String>)> {
     let v = plist::Value::from_file(app.join("Contents/Info.plist")).ok()?;
     let d = v.as_dictionary()?;
     let id = d.get("CFBundleIdentifier")?.as_string()?.trim().to_string();
@@ -479,6 +479,7 @@ pub fn inventory(env: &Env) -> Vec<AppInfo> {
                 uninstaller: uninstaller.map(|p| s(&p)),
                 admin,
                 source: b.source.clone(),
+                storage: crate::storage::profile(&b.path, &b.id).is_some(),
             }
         })
         .collect();

@@ -104,6 +104,28 @@ export interface AppInfo {
   last_used?: number;
   running: boolean;
   apple: boolean;
+  /** Disko has a storage page for it (`app_storage`): Xcode, Adobe, browsers, Electron apps. */
+  storage?: boolean;
+}
+
+/** One app's storage page: everything it keeps that you can sort out item by item. */
+export interface AppStorage {
+  app: { name: string; path: string; icon: string; version?: string; profile: 'xcode' | 'adobe' | 'browser' | 'electron' | string };
+  bytes: number;
+  groups: StorageGroup[];
+}
+
+export interface StorageGroup {
+  /** "simulators" | "runtimes" | "device-support" | "derived-data" | "archives" | "caches" | "xcodes" | "media-cache" | "old-versions" | "profiles" | "cli-versions" */
+  id: string;
+  title: string;
+  /** Glyph key. */
+  icon: string;
+  bytes: number;
+  /** Fine print for the whole group, only where it matters. */
+  note?: string;
+  /** Findings: removed through `clean` by id like any other. */
+  items: Finding[];
 }
 
 export interface AgentSession {

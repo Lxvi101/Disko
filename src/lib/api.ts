@@ -1,7 +1,7 @@
 // The only place the UI talks to the app. In a plain browser (no Tauri) everything is served by
 // `mock.ts`, a fake Mac, so `bun run dev` shows the whole app.
 import type {
-  AgentTool, AppInfo, BootInfo, CleanFailure, CleanResult, Events, Finding, McpClient, Memory,
+  AgentTool, AppInfo, AppStorage, BootInfo, CleanFailure, CleanResult, Events, Finding, McpClient, Memory,
   MemoryOp, Trashed, TreeNode,
 } from './types';
 
@@ -34,6 +34,7 @@ export const api = {
   clean: (ids: string[], paths: string[]) => call<CleanResult>('clean', { ids, paths }),
   undo: (trashed: Trashed[]) => call<{ restored: number; failed: CleanFailure[] }>('undo', { trashed }),
   apps: () => call<AppInfo[]>('apps'),
+  appStorage: (path: string) => call<AppStorage | null>('app_storage', { path }),
   uninstall: (paths: string[]) => call<CleanResult>('uninstall', { paths }),
   sessions: () => call<AgentTool[]>('sessions'),
   memory: () => call<Memory>('memory'),

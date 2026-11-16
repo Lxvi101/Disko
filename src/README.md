@@ -6,4 +6,4 @@
 - `lib/api.ts` is the only door to the app (Tauri `invoke`/`listen`). Without `window.__TAURI_INTERNALS__` it uses `lib/mock.ts`, a fake Mac with a streaming ~8 s scan, so `bun run dev` shows the whole UI.
 - `lib/types.ts` mirrors `crates/core/src/types.rs` and docs/contract.md (snake_case). `lib/categories.ts` defines each category's colour + icon once. `lib/icons.tsx` has glyphs, app icons and node icons.
 - `sections/space/`: `model.ts` (fetch + live refresh + hidden-space slices), `Sunburst` (canvas, clutter halo), `Bubbles` (pack), `Blocks` (treemap), `FolderList` (side list + list view).
-- `sections/`: `Clutter`, `Apps`, `Agents`, `Memory`, `Settings`.
+- `sections/`: `Clutter`, `Apps` (with `AppStorage`, an app's storage page: every simulator, runtime, cache …), `Agents`, `Memory`, `Settings`.

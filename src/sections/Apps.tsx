@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Apple, Trash2 } from 'lucide-react';
+import { Apple, ChevronRight, Trash2 } from 'lucide-react';
 import { useStore, sel } from '../store';
 import { age, daysSince, splitBytes, bytes } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { Checkbox } from '../components/ui/Checkbox';
 import { Tip } from '../components/ui/Tip';
+import { AppStorageView } from './AppStorage';
 import type { AppInfo } from '../lib/types';
 
 type Sort = 'size' | 'used';
@@ -13,6 +14,7 @@ type Sort = 'size' | 'used';
 export const Apps: React.FC = () => {
   const apps = useStore((s) => s.apps);
   const [sort, setSort] = useState<Sort>('size');
+  const [open, setOpen] = useState<AppInfo | null>(null);
   const sorted = useMemo(() => {
     const list = [...(apps ?? [])];
     return sort === 'size'
@@ -23,6 +25,8 @@ export const Apps: React.FC = () => {
   const max = Math.max(1, ...sorted.map((a) => a.app_bytes + a.data_bytes));
   const t = splitBytes(total);
   const idle = sorted.filter((a) => daysSince(a.last_used) > 90).length;
+
+  if (open) return <AppStorageView app={apps?.find((a) => a.path === open.path) ?? open} onBack={() => setOpen(null)} />;
 
   return (
     <div className="scroll h-full px-7 pb-32">
@@ -49,14 +53,14 @@ export const Apps: React.FC = () => {
       {!apps && <div className="flex flex-col gap-3">{Array.from({ length: 8 }, (_, i) => <div key={i} className="h-[76px] rounded-3xl shimmer" />)}</div>}
       <div className="flex flex-col gap-1.5">
         <AnimatePresence initial={false}>
-          {sorted.map((a, i) => <AppRow key={a.path} app={a} max={max} index={i} />)}
+          {sorted.map((a, i) => <AppRow key={a.path} app={a} max={max} index={i} onOpen={a.storage ? () => setOpen(a) : undefined} />)}
         </AnimatePresence>
       </div>
     </div>
   );
 };
 
-const AppRow: React.FC<{ app: AppInfo; max: number; index: number }> = ({ app, max, index }) => {
+const AppRow: React.FC<{ app: AppInfo; max: number; index: number; onOpen?: () => void }> = ({ app, max, index, onOpen }) => {
   const picked = useStore((s) => s.selection.has(`a:${app.path}`));
   const toggle = useStore((s) => s.toggle);
   const remove = useStore((s) => s.remove);
@@ -104,6 +108,13 @@ const AppRow: React.FC<{ app: AppInfo; max: number; index: number }> = ({ app, m
           <Trash2 size={16} /> Uninstall
         </button>
       </Tip>
+      {onOpen ? (
+        <Tip content={`Everything ${app.name} keeps, item by item`}>
+          <button className="btn btn-icon !w-10 !h-10" aria-label={`Manage ${app.name}`} onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+            <ChevronRight size={19} />
+          </button>
+        </Tip>
+      ) : <span className="w-10 shrink-0" />}
     </motion.div>
   );
 };

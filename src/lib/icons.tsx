@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AppWindow, Apple, Archive, Beer, Box, Cog, Container, Croissant, Disc3, EyeOff, File, FileCode, FileText, Film, Folder,
   GitBranch, HardDrive, Hexagon, Image, Layers, Music, Package, ScrollText, Smartphone, Sparkle, Sparkles, Terminal,
-  Trash2, Watch, Hammer, Code2, Lock, type LucideIcon,
+  Trash2, Watch, Hammer, Code2, Lock, Tablet, Tv, Glasses, type LucideIcon,
 } from 'lucide-react';
 import { api } from './api';
 import { catOf } from './categories';
@@ -16,7 +16,8 @@ const GLYPHS: Record<string, [LucideIcon, string]> = {
   box: [Box, '#c2a565'], app: [AppWindow, '#8b93a6'], cache: [Layers, '#5c9fa6'], iphone: [Smartphone, '#6e8dcf'],
   apple: [Apple, '#a3a8b4'], disc: [Disc3, '#6fa588'], sparkles: [Sparkles, '#9aa66a'], watch: [Watch, '#8394c8'],
   film: [Film, '#a57fb2'], archive: [Archive, '#b99a62'], bun: [Croissant, '#c9b48e'], folder: [Folder, '#7f9bd2'],
-  disk: [HardDrive, '#9298a6'],
+  disk: [HardDrive, '#9298a6'], terminal: [Terminal, '#6fa588'], tablet: [Tablet, '#6e8dcf'], tv: [Tv, '#8394c8'],
+  vision: [Glasses, '#9187c8'],
 };
 
 export function glyphOf(key: string): [LucideIcon, string] {

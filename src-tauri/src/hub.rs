@@ -59,6 +59,9 @@ pub struct Hub {
     matchers: Arc<Matchers>,
     store: Mutex<Store>,
     findings: RwLock<BTreeMap<String, Finding>>,
+    /// Items of app storage pages (`app_storage`), so `clean` can remove them by id. Not clutter:
+    /// never listed, never in routines.
+    storage: RwLock<BTreeMap<String, Finding>>,
     emit: Emit,
     pending: Mutex<Pending>,
     scanning: AtomicBool,
@@ -93,6 +96,7 @@ impl Hub {
             matchers,
             store: Mutex::new(store),
             findings: RwLock::new(BTreeMap::new()),
+            storage: RwLock::new(BTreeMap::new()),
             emit,
             pending: Mutex::new(Pending::default()),
             scanning: AtomicBool::new(false),
@@ -434,14 +438,44 @@ impl Hub {
         self.engine.volume()
     }
 
+    /// One app's storage page. Its items become cleanable by id; kept ones are marked busy.
+    pub fn app_storage(&self, path: &str) -> Option<disko_apps::AppStorage> {
+        let mut st = disko_apps::storage(Path::new(path))?;
+        {
+            let mut store = self.store.lock().unwrap();
+            let keep = store.keep();
+            for f in st.groups.iter_mut().flat_map(|g| g.items.iter_mut()) {
+                if keep.finding_kept_by(f).is_some() {
+                    f.busy = Some("On your keep list".into());
+                }
+            }
+        }
+        let mut map = self.storage.write().unwrap();
+        for f in st.groups.iter().flat_map(|g| g.items.iter()) {
+            map.insert(f.id.clone(), f.clone());
+        }
+        Some(st)
+    }
+
     // ---------- cleaning ----------
 
     /// Clean findings by id (each with its own action, or the Trash when `trash_ids`), and plain
     /// paths (always to the Trash). The tree and findings update before this returns.
     pub fn clean(&self, ids: &[String], trash_ids: &[String], paths: &[String]) -> CleanResult {
+        let storage_ids: HashSet<String>;
         let mut findings: Vec<Finding> = {
             let map = self.findings.read().unwrap();
-            let mut v: Vec<Finding> = ids.iter().chain(trash_ids.iter()).filter_map(|id| map.get(id).cloned()).collect();
+            let smap = self.storage.read().unwrap();
+            let mut v: Vec<Finding> = Vec::new();
+            for id in ids.iter().chain(trash_ids.iter()) {
+                if v.iter().any(|f| &f.id == id) {
+                    continue;
+                }
+                if let Some(f) = map.get(id).or_else(|| smap.get(id)) {
+                    v.push(f.clone());
+                }
+            }
+            storage_ids = v.iter().filter(|f| smap.contains_key(&f.id)).map(|f| f.id.clone()).collect();
             // A tool command (e.g. `brew cleanup`) removes everything it owns, so every finding
             // sharing it joins the request: its keep/busy checks apply and it's reported honestly.
             let cmds: Vec<Vec<String>> = v
@@ -452,7 +486,7 @@ impl Hub {
                 })
                 .collect();
             if !cmds.is_empty() {
-                for f in map.values() {
+                for f in map.values().chain(smap.values()) {
                     if v.iter().any(|x| x.id == f.id) {
                         continue;
                     }
@@ -465,6 +499,23 @@ impl Hub {
             }
             v
         };
+        // Storage items: what only the app's profile knows (a simulator booted meanwhile, an
+        // Adobe app opened, a CLI version now in use) keeps them, like busy findings.
+        let mut storage_skipped: Vec<CleanFailure> = Vec::new();
+        let storage_items: Vec<Finding> = findings.iter().filter(|f| storage_ids.contains(&f.id)).cloned().collect();
+        if !storage_items.is_empty() {
+            let blocked = disko_apps::storage::recheck(&storage_items);
+            findings.retain(|f| {
+                let Some((_, why)) = blocked.iter().find(|(id, _)| id == &f.id) else { return true };
+                if f.paths.is_empty() {
+                    storage_skipped.push(CleanFailure { path: f.title.clone(), error: why.clone() });
+                }
+                for p in &f.paths {
+                    storage_skipped.push(CleanFailure { path: p.clone(), error: why.clone() });
+                }
+                false
+            });
+        }
         for f in findings.iter_mut() {
             if trash_ids.contains(&f.id) && f.action != disko_core::Action::Trash {
                 f.action = disko_core::Action::Trash;
@@ -477,6 +528,7 @@ impl Hub {
         } else {
             self.clutter().clean(&findings, &is_kept, &mut |_, _, _| {})
         };
+        result.skipped.extend(storage_skipped);
         for p in paths {
             if is_kept(p) {
                 result.skipped.push(CleanFailure { path: p.clone(), error: "On your keep list.".into() });
@@ -494,6 +546,15 @@ impl Hub {
                 }
                 Err(e) => result.failed.push(CleanFailure { path: p.clone(), error: e }),
             }
+        }
+        {
+            let mut smap = self.storage.write().unwrap();
+            for id in &result.removed {
+                smap.remove(id);
+            }
+        }
+        if !result.removed.is_empty() {
+            disko_apps::storage::invalidate();
         }
         self.after_removal(&findings, &result);
         disko_apps::size::invalidate(None);

@@ -53,6 +53,7 @@ All return JSON matching `crates/core/src/types.rs` (camelCase is NOT used; fiel
 | `clean` | `{ ids: string[], paths: string[] }` | `CleanResult` |
 | `undo` | `{ trashed: Trashed[] }` | `{ restored: number, failed: CleanFailure[] }` |
 | `apps` | – | `AppInfo[]` |
+| `app_storage` | `{ path: string }` (app bundle path, for apps with `storage: true`) | `AppStorage \| null`; its items become cleanable by id through `clean` |
 | `uninstall` | `{ paths: string[] }` (app bundle paths) | `CleanResult` (app + its data + leftovers to Trash) |
 | `sessions` | – | `AgentTool[]` |
 | `memory` | – | `Memory` |
@@ -77,7 +78,19 @@ All return JSON matching `crates/core/src/types.rs` (camelCase is NOT used; fiel
 
 ```ts
 AppInfo   { name, bundle_id, path, version?, icon: "app:<path>", app_bytes, data_bytes,
-            data_paths: string[], last_used?: number, running: boolean, apple: boolean }
+            data_paths: string[], last_used?: number, running: boolean, apple: boolean,
+            storage: boolean }   // storage: has an `app_storage` page
+AppStorage   { app: { name, path, icon, version?, profile: "xcode"|"adobe"|"browser"|"electron" },
+               bytes, groups: StorageGroup[] }
+StorageGroup { id, title, icon, bytes, note?: string, items: Finding[] }
+// The full per-app inventory the user picks from (every simulator, runtime, device-support
+// version, DerivedData project, archive, cache folder; Adobe media/disk caches and data of older
+// versions; browser caches per profile; Electron caches; older bundled CLI versions). Items are
+// ordinary Findings: same keep list, guard, busy checks and actions. Simulators and runtimes are
+// removed with `xcrun simctl delete` / `simctl runtime delete` (Command; `env DEVELOPER_DIR=…`
+// when xcode-select points at the Command Line Tools); runtime items share id, rule and command
+// with the clutter crate's runtime findings. Right before removing, `storage::recheck` keeps
+// items that became busy (a simulator booted, an Adobe app opened, a CLI version now in use).
 AgentTool { tool: "claude-code"|"codex"|"t3code"|"cursor"|…, name, icon, bytes,
             projects: AgentProject[] }
 AgentProject { name, path?: string, bytes, last_used?: number, sessions: AgentSession[] }

@@ -43,6 +43,10 @@ pub struct AppInfo {
     pub admin: bool,
     /// added: "app-store" | "developer-id" | "apple" | "unsigned" | "other".
     pub source: String,
+    /// added: Disko has a storage page for this app (`app_storage`): Xcode, Adobe, Chromium
+    /// browsers, Electron apps.
+    #[serde(default)]
+    pub storage: bool,
 }
 
 /// One coding agent (Claude Code, Codex, T3 Code …) and where its disk space went.
