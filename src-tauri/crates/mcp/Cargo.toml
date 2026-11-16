@@ -1,0 +1,13 @@
+[package]
+name = "disko-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Disko's MCP server for coding agents, and helpers to register it with them"
+
+[dependencies]
+disko-core = { path = "../core" }
+disko-memory = { path = "../memory" }
+serde.workspace = true
+serde_json.workspace = true
+toml_edit = "0.25"

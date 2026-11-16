@@ -1,0 +1,12 @@
+[package]
+name = "disko-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Disko's memory: keep list, learned rules, routines, community rule pack"
+
+[dependencies]
+disko-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
