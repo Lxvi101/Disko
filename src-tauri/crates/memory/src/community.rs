@@ -1,9 +1,10 @@
 //! The community rule pack: generic clutter sources contributed by Disko users (anonymized,
 //! reviewed and merged in the GitHub repo under `rules/community.json`). Disko ships a copy and
 //! fetches the latest at most once a day. Rules are data only: a pack can never carry commands,
-//! and every rule passes the same validation as user and agent rules.
+//! every rule passes the same validation as user and agent rules, and community rules are always
+//! `review` (their findings go to the Trash; they never take part in routines).
 
-use crate::rules::validate_rule;
+use crate::rules::{normalize_rule, validate_rule};
 use crate::LearnedRule;
 use disko_core::Source;
 use serde_json::Value;
@@ -57,6 +58,7 @@ pub fn parse_pack(bytes: &[u8]) -> Result<Pack, String> {
         r.source = Source::Community;
         r.shared = false;
         r.added = 0;
+        normalize_rule(&mut r);
         if r.id.is_empty() || validate_rule(&r, &home).is_err() || pack.rules.iter().any(|x| x.id == r.id) {
             pack.dropped += 1;
             continue;
@@ -116,6 +118,25 @@ mod tests {
         assert!(p.rules.len() >= 5, "bundled pack should have rules");
         assert_eq!(p.dropped, 0, "every bundled rule must validate");
         assert!(p.rules.iter().all(|r| r.source == Source::Community));
+    }
+
+    #[test]
+    fn community_rules_are_always_review() {
+        use disko_core::Safety;
+        let p = parse_pack(BUNDLED.as_bytes()).unwrap();
+        assert!(p.rules.iter().all(|r| r.safety == Safety::Review));
+        // A pack that claims `safe` (or claims to be from the user) still gets review.
+        let j = r#"{"schema_version":1,"updated":"2030-01-01","rules":[
+            {"id":"evil","pattern":"~/Projects/*/notes","category":"build","title":"Notes","safety":"safe","source":"user"},
+            {"id":"thesis","pattern":"~/Documents/Thesis","category":"cache","title":"Cache","safety":"safe"},
+            {"id":"git","pattern":"~/Dev/*/.git","category":"build","title":"Git","safety":"safe"},
+            {"id":"mail","pattern":"~/Library/Mail/V10","category":"cache","title":"Mail","safety":"safe"},
+            {"id":"glob","pattern":"~/**/Thesis","category":"build","title":"Thesis","safety":"safe"},
+            {"id":"sys","pattern":"/Library/Caches/com.x","category":"cache","title":"Sys","safety":"safe"}
+        ]}"#;
+        let p = parse_pack(j.as_bytes()).unwrap();
+        assert_eq!(p.dropped, 4, "{:?}", p.rules);
+        assert!(p.rules.iter().all(|r| r.safety == Safety::Review && r.source == Source::Community));
     }
 
     #[test]

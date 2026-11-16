@@ -3,7 +3,7 @@
 //! [`crate::Store::record_run`].
 
 use crate::{KeepSet, Routine, RoutineSelect};
-use disko_core::{Action, Category, Finding, Safety};
+use disko_core::{Action, Category, Finding, Safety, Source};
 
 const DAY: i64 = 86_400;
 
@@ -46,10 +46,21 @@ impl Routine {
     }
 }
 
+/// Findings from rules an agent or the community pack wrote: never cleaned in the background.
+/// Only rules the user made themselves (and Disko's built-in ones) take part in routines.
+pub fn from_untrusted_rule(f: &Finding) -> bool {
+    matches!(f.source, Source::Agent | Source::Community)
+        || f.rule.starts_with("community.")
+        || (f.rule.starts_with("learned.") && f.source != Source::User)
+}
+
 /// Why a finding isn't taken by a routine, or None if it is.
 pub fn reject_reason(f: &Finding, routine: &Routine, now: i64, keep: &KeepSet) -> Option<String> {
     if !routine.selects(f) {
         return Some("not selected by this routine".into());
+    }
+    if from_untrusted_rule(f) {
+        return Some("from an agent's or the community's rule (only cleaned by hand)".into());
     }
     if let Some(k) = keep.finding_kept_by(f) {
         return Some(format!("on the keep list ({})", k.pattern));
@@ -143,5 +154,37 @@ mod tests {
         let by_rule = Routine { select: RoutineSelect { categories: vec![], rules: vec!["cache".into()] }, review: false, ..r };
         let got: Vec<String> = select(&fs, &by_rule, now, &keep).into_iter().map(|f| f.id).collect();
         assert_eq!(got, vec!["cache"]);
+    }
+
+    #[test]
+    fn agent_and_community_rules_never_run_in_routines() {
+        let now = 1_000_000_000;
+        let keep = KeepSet::default();
+        let learned = |id: &str, rule: &str, src: Source, safety: Safety| Finding {
+            rule: rule.into(),
+            source: src,
+            ..finding(id, Category::Build, safety, 9, &format!("/Users/me/{}/target", id))
+        };
+        let fs = vec![
+            learned("user", "learned.mine", Source::User, Safety::Safe),
+            learned("agent", "learned.agents", Source::Agent, Safety::Safe),
+            learned("community", "community.dart-tool", Source::Community, Safety::Safe),
+            // Mislabelled sources don't get through either.
+            learned("forged", "community.x", Source::User, Safety::Safe),
+            learned("forged2", "learned.y", Source::Builtin, Safety::Safe),
+            learned("agent-review", "learned.z", Source::Agent, Safety::Review),
+        ];
+        let mut r = suggested().remove(0);
+        r.enabled = true;
+        r.review = true;
+        let got: Vec<String> = select(&fs, &r, now, &keep).into_iter().map(|f| f.id).collect();
+        assert_eq!(got, vec!["user"]);
+        let by_rule = Routine {
+            select: RoutineSelect { categories: vec![], rules: vec!["agents".into(), "dart-tool".into(), "mine".into()] },
+            ..r
+        };
+        let got: Vec<String> = select(&fs, &by_rule, now, &keep).into_iter().map(|f| f.id).collect();
+        assert_eq!(got, vec!["user"]);
+        assert!(reject_reason(&fs[1], &by_rule, now, &keep).unwrap().contains("agent"));
     }
 }

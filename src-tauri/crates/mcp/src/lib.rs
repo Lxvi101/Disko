@@ -1,8 +1,9 @@
 //! `disko --mcp`: Disko's MCP server for coding agents (JSON-RPC 2.0 over stdio, one message per
 //! line). Agents get Disko's whole-disk index and clutter findings in compact, size-sorted form,
-//! can clean through Disko's safety rules (keep list wins, permanent delete only for rebuildable
-//! data), and teach Disko: keep entries, new clutter sources (learned rules, optionally shared
-//! anonymously), and routines.
+//! can clean through Disko's safety rules (keep list wins; agents only move things to the Trash or
+//! run the owning tool's cleanup command, permanent deletion is always the user's action in the
+//! app), and teach Disko: keep entries, new clutter sources (learned rules, always `review`,
+//! optionally shared anonymously), and routines.
 //!
 //! This crate knows nothing about the scan engine, clutter rules or apps: the app implements
 //! [`Backend`] by wiring those crates together. Memory tools are implemented here directly on
@@ -44,7 +45,8 @@ pub struct CleanRequest {
     /// Finding ids: each is removed with its own `action` (Delete only exists on `Safety::Safe`
     /// findings; Trash; or the owning tool's Command).
     pub ids: Vec<String>,
-    /// Ids of findings to move to the Trash instead of their own action (agent asked for Trash).
+    /// Ids of findings to move to the Trash instead of their own action. The MCP server puts every
+    /// finding without a tool `Command` here: agents never delete permanently.
     pub trash_ids: Vec<String>,
     /// Arbitrary absolute paths: always moved to the Trash (never deleted permanently).
     pub paths: Vec<String>,
@@ -90,10 +92,10 @@ Disko indexes this Mac's whole disk and knows what's clutter. Use it instead of 
 Start with `overview` (disk, scan state, clutter by category, routines). Then:
 - Where did space go: `largest` (optionally `under` a folder), `tree` to drill in, `search` by name.
 - What can go: `clutter` (filter by category/safety/query; sorted by size). `explain` any path: which rule, owner, regrows, keep status.
-- Remove: `clean` with finding ids (or paths). Safe (rebuildable) findings are deleted, review findings go to the Trash (Undo: Finder › Put Back), tool-managed ones run the tool's own cleanup. Arbitrary paths only go to the Trash. Use `dry_run: true` to preview. Ask the user before removing review items or anything personal.
-- The keep list always wins. When the user says to keep something, call `keep`. Never clean around it.
-- Teach Disko: when you find a new kind of rebuildable clutter Disko didn't list (a tool cache, a build output folder), call `add_rule` with a ~/ glob (`**` for any depth, e.g. ~/**/.turbo). Set `share: true` only for generic, non-personal sources; it's queued anonymized for the community pack.
-- Routines: `memory` lists them; `set_routine` (e.g. enable \"build-artifacts\": build output untouched for 2 days, every 2 days) and `run_routine`. Only enable or create routines the user asked for.
+- Remove: `clean` with finding ids (or paths). Everything goes to the macOS Trash (Undo: Finder › Put Back, or Disko's Undo); tool-managed findings run the tool's own cleanup command instead. Nothing is ever deleted permanently through this server: emptying the Trash or deleting for good is the user's action in Disko. Use `dry_run: true` to preview. Ask the user before removing review items or anything personal.
+- The keep list always wins. When the user says to keep something, call `keep`. Never clean around it. `unkeep` only removes entries an agent added; the user's own entries are theirs.
+- Teach Disko: when you find a new kind of rebuildable clutter Disko didn't list (a tool cache, a build output folder), call `add_rule` with a ~/ glob (`**` for any depth, ending in a known build/cache folder, e.g. ~/**/.turbo). Agent rules are review items (to the Trash), never run in routines, and can't change the user's own rules. Set `share: true` only for generic, non-personal sources; it's queued anonymized for the community pack.
+- Routines: `memory` lists them; `set_routine` (e.g. enable \"build-artifacts\": build output untouched for 2 days, every 2 days) and `run_routine` (run from here, items go to the Trash). Only enable or create routines the user asked for.
 Sizes come as text and bytes. Paths are absolute. Results are capped; use `limit`.";
 
 /// The MCP server: a backend plus the memory store.

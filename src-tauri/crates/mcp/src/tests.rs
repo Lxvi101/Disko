@@ -2,6 +2,7 @@
 
 use super::*;
 use disko_core::{Action, Category, CleanFailure, Finding, HiddenSpace, Safety, Source, Trashed};
+use disko_memory::MemoryOp;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -159,7 +160,8 @@ impl Env {
             cleaned: Mutex::new(vec![]),
             changed: AtomicUsize::new(0),
         });
-        let store = disko_memory::Store::open(dir.join("support"), disko_core::paths::home());
+        // `~` is the test dir, so learned rules (home only) can point at fixtures.
+        let store = disko_memory::Store::open(dir.join("support"), dir.clone());
         let srv = Server::new(fake.clone(), store);
         Env { srv, fake, dir, next: std::cell::Cell::new(1) }
     }
@@ -341,8 +343,9 @@ fn clean_respects_safety_keep_and_busy() {
                 "paths": [e.p("loose"), e.p("missing"), "/System/Library", "~", e.p("keepme/node_modules/x"), e.p("live/target")] }),
     );
     let req = e.fake.cleaned.lock().unwrap()[0].clone();
-    assert_eq!(req.ids, vec!["old-target", "old-video", "brew", "fresh-target"], "a path equal to a finding is cleaned as that finding");
-    assert!(req.trash_ids.is_empty());
+    // Nothing is deleted permanently through MCP: only the tool command keeps its own action.
+    assert_eq!(req.ids, vec!["brew"]);
+    assert_eq!(req.trash_ids, vec!["old-target", "old-video", "fresh-target"], "a path equal to a finding is cleaned as that finding");
     assert_eq!(req.paths, vec![e.p("loose")]);
     let skipped: Vec<String> = r["skipped"].as_array().unwrap().iter().map(|s| s["item"].as_str().unwrap().to_string()).collect();
     for s in ["kept-nm", "busy-dd", "root-cache", "ghost", "/System/Library"] {
@@ -352,22 +355,29 @@ fn clean_respects_safety_keep_and_busy() {
     assert!(r["freed_bytes"].as_u64().unwrap() > 9_000_000_000);
     assert!(r["undo"].is_string());
 
-    // trash: true moves safe findings to the Trash instead of deleting; commands still run as commands.
+    // `trash: false` changes nothing: still the Trash.
     e.fake.findings.lock().unwrap().push(finding("t1", Category::Build, Safety::Safe, 5, 5, "/tmp/disko-fake-t1"));
-    e.ok("clean", json!({ "ids": ["t1"], "trash": true }));
+    e.ok("clean", json!({ "ids": ["t1"], "trash": false }));
     let req = e.fake.cleaned.lock().unwrap()[1].clone();
     assert_eq!(req.trash_ids, vec!["t1"]);
     assert!(req.ids.is_empty());
 
-    // A finding claiming Delete without being safe is refused.
+    // A finding claiming Delete (whatever its safety) goes to the Trash too.
     let mut bad = finding("bad", Category::Leftovers, Safety::Review, 5, 5, "/tmp/disko-fake-bad");
     bad.action = Action::Delete;
     e.fake.findings.lock().unwrap().push(bad);
-    let r = e.ok("clean", json!({ "ids": ["bad"] }));
-    assert_eq!(r["note"], "Nothing to clean.");
-    assert_eq!(e.fake.cleaned.lock().unwrap().len(), 2);
+    e.ok("clean", json!({ "ids": ["bad"] }));
+    let req = e.fake.cleaned.lock().unwrap()[2].clone();
+    assert_eq!((req.ids.len(), req.trash_ids.clone()), (0, vec!["bad".to_string()]));
     let (_, err) = e.call("clean", json!({}));
     assert!(err);
+
+    // `clutter` tells agents what clean will do.
+    let c = e.ok("clutter", json!({ "min_bytes": 0, "limit": 500 }));
+    for f in c["findings"].as_array().unwrap() {
+        let how = f["action"].as_str().unwrap();
+        assert!(how == "trash" || how.starts_with("command:"), "{}", f);
+    }
 }
 
 #[test]
@@ -377,7 +387,7 @@ fn rules_explain_and_sharing() {
     std::fs::write(e.p("ws/a/.turbo/blob"), vec![1u8; 20_000]).unwrap();
     std::fs::create_dir_all(e.p("ws/b/.turbo")).unwrap();
 
-    let pattern = format!("{}/ws/*/.turbo", e.dir.display());
+    let pattern = "~/ws/*/.turbo";
     let d = e.ok("add_rule", json!({ "pattern": pattern, "title": "Turbo cache", "category": "build", "safety": "safe", "regrows": true, "why": "Turborepo cache; rebuilt on the next build.", "dry_run": true }));
     assert_eq!(d["matches"]["count"], 2);
     assert!(d["matches"]["bytes"].as_u64().unwrap() >= 20_000);
@@ -394,12 +404,10 @@ fn rules_explain_and_sharing() {
     let r = e.ok("add_rule", json!({ "pattern": "~/**/.turbo", "title": "Turbo anywhere", "category": "build", "safety": "safe", "dry_run": true }));
     assert_eq!(r["matches"]["count"], 0, "fake search paths are under /Users/x, not this HOME");
 
-    for bad in [json!({ "pattern": "~/*", "title": "x", "category": "build", "safety": "safe" }),
-                json!({ "pattern": "~/Documents", "title": "x", "category": "build", "safety": "safe" }),
-                json!({ "pattern": "~/.x/y", "title": "x", "category": "forgotten", "safety": "safe" }),
-                json!({ "pattern": "~/.x/y", "title": "x", "category": "build" })] {
-        let (_, err) = e.call("add_rule", bad.clone());
-        assert!(err, "should fail: {}", bad);
+    for pattern in ["~/*", "~/Documents", "~/Dev/app/.git", "~/Dev/*/.GIT/objects", "~/Library/Mail/V10", "~/Library/Application Support/x",
+                    "~/.ssh/id_rsa", "~/.config/gh", "~/**/Thesis", "/tmp/x/build", "/Library/Caches/com.x"] {
+        let (msg, err) = e.call("add_rule", json!({ "pattern": pattern, "title": "x", "category": "build", "safety": "safe" }));
+        assert!(err, "should fail: {} ({})", pattern, msg);
     }
 
     e.ok("keep", json!({ "pattern": e.p("ws/a") }));
@@ -415,6 +423,98 @@ fn rules_explain_and_sharing() {
     assert!(m["rules"].as_array().unwrap().is_empty());
     assert!(m["community"]["queued_submissions"].as_array().unwrap().is_empty());
     assert!(m["community"]["rules"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn agents_never_delete_permanently() {
+    let e = Env::new("no-delete");
+    std::fs::create_dir_all(e.p("Documents/Thesis")).unwrap();
+    std::fs::write(e.p("Documents/Thesis/ch1.tex"), b"years of work").unwrap();
+
+    // The review's attack: a "safe cache" rule over personal files. It's saved as review.
+    let r = e.ok("add_rule", json!({ "pattern": "~/Documents/Thesis", "title": "Cache", "category": "cache", "safety": "safe", "regrows": true }));
+    assert_eq!(r["rule"]["safety"], "review");
+    assert!(r["note"].as_str().unwrap().contains("review"));
+    let m = e.ok("memory", json!({}));
+    assert_eq!(m["rules"][0]["safety"], "review");
+    assert_eq!(m["rules"][0]["source"], "agent");
+
+    // Even if a finding from it claimed safe + Delete, clean by id or by path only trashes it.
+    let mut f = finding("thesis", Category::Cache, Safety::Safe, 50_000_000, 30, &e.p("Documents/Thesis"));
+    f.rule = "learned.cache".into();
+    f.source = Source::Agent;
+    e.fake.findings.lock().unwrap().push(f);
+    let c = e.ok("clutter", json!({ "query": "thesis" }));
+    assert_eq!(c["findings"][0]["action"], "trash");
+    e.ok("clean", json!({ "ids": ["thesis"] }));
+    e.fake.findings.lock().unwrap().push({
+        let mut f = finding("thesis", Category::Cache, Safety::Safe, 50_000_000, 30, &e.p("Documents/Thesis"));
+        f.rule = "learned.cache".into();
+        f.source = Source::Agent;
+        f
+    });
+    e.ok("clean", json!({ "paths": [e.p("Documents/Thesis")] }));
+    for req in e.fake.cleaned.lock().unwrap().iter() {
+        assert!(req.ids.is_empty(), "nothing with its own (Delete) action: {:?}", req);
+        assert_eq!(req.trash_ids, vec!["thesis"]);
+    }
+
+    // Routines never take agent or community rule findings, even ones selected by category.
+    e.fake.findings.lock().unwrap().push({
+        let mut f = finding("agent-build", Category::Build, Safety::Safe, 1_000_000_000, 30, &e.p("x/build"));
+        f.rule = "learned.x".into();
+        f.source = Source::Agent;
+        f
+    });
+    e.fake.findings.lock().unwrap().push({
+        let mut f = finding("community-build", Category::Build, Safety::Safe, 1_000_000_000, 30, &e.p("y/.dart_tool"));
+        f.rule = "community.dart-tool".into();
+        f.source = Source::Community;
+        f
+    });
+    e.ok("set_routine", json!({ "id": "build-artifacts", "enabled": true, "review": true }));
+    let d = e.ok("run_routine", json!({ "id": "build-artifacts", "dry_run": true }));
+    let ids: Vec<&str> = d["ran"][0]["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap()).collect();
+    assert!(!ids.contains(&"agent-build") && !ids.contains(&"community-build"), "{:?}", ids);
+}
+
+#[test]
+fn agents_cant_undo_the_users_choices() {
+    let e = Env::new("user-wins");
+    // The user's keep entry: an agent can't remove it.
+    e.srv.store().apply(MemoryOp::Keep { pattern: e.p("Thesis"), note: None, source: None }).unwrap();
+    let (msg, err) = e.call("unkeep", json!({ "id": e.p("Thesis") }));
+    assert!(err && msg.as_str().unwrap().contains("user"), "{}", msg);
+    let m = e.ok("memory", json!({}));
+    assert_eq!(m["keep"].as_array().unwrap().len(), 1);
+    let id = m["keep"][0]["id"].as_str().unwrap().to_string();
+    let (_, err) = e.call("unkeep", json!({ "id": id }));
+    assert!(err);
+    // Its own: fine.
+    e.ok("keep", json!({ "pattern": e.p("agent-kept") }));
+    e.ok("unkeep", json!({ "id": e.p("agent-kept") }));
+
+    // The user's rule: an agent can't overwrite it by id or shadow it by pattern.
+    let mine = disko_memory::LearnedRule {
+        id: "turbo".into(),
+        pattern: "~/.turbo/cache".into(),
+        category: Category::Build,
+        title: "Turbo".into(),
+        why: String::new(),
+        regrows: true,
+        safety: Safety::Safe,
+        source: Source::User,
+        added: 0,
+        shared: false,
+    };
+    e.srv.store().apply(MemoryOp::AddRule { rule: mine }).unwrap();
+    let (msg, err) = e.call("add_rule", json!({ "id": "turbo", "pattern": "~/Documents/x", "title": "x", "category": "cache" }));
+    assert!(err && msg.as_str().unwrap().contains("user"), "{}", msg);
+    let (_, err) = e.call("add_rule", json!({ "pattern": "~/.Turbo/cache", "title": "Shadow", "category": "cache" }));
+    assert!(err);
+    let m = e.ok("memory", json!({}));
+    assert_eq!(m["rules"].as_array().unwrap().len(), 1);
+    assert_eq!(m["rules"][0]["safety"], "safe");
 }
 
 #[test]
@@ -438,7 +538,9 @@ fn routines_end_to_end() {
     let r = e.ok("run_routine", json!({}));
     assert_eq!(r["ran"][0]["id"], "build-artifacts");
     assert_eq!(r["ran"][0]["freed"], "3.0 GB");
-    assert_eq!(e.fake.cleaned.lock().unwrap()[0].ids, vec!["old-target"]);
+    let req = e.fake.cleaned.lock().unwrap()[0].clone();
+    assert_eq!(req.trash_ids, vec!["old-target"], "run from MCP, routine items go to the Trash");
+    assert!(req.ids.is_empty());
     let m = e.ok("memory", json!({}));
     assert_eq!(m["routines"][0]["last_freed"], "3.0 GB");
     assert_eq!(m["routines"][0]["due"], false);

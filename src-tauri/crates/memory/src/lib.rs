@@ -158,7 +158,12 @@ pub enum MemoryOp {
         source: Option<Source>,
     },
     /// By entry id, or by its exact pattern.
-    Unkeep { id: String },
+    Unkeep {
+        id: String,
+        /// `agent` (set by the MCP server): only entries an agent added may be removed.
+        #[serde(default)]
+        source: Option<Source>,
+    },
     AddRule { rule: LearnedRule },
     RemoveRule { id: String },
     /// Turn sharing of a learned rule on or off.

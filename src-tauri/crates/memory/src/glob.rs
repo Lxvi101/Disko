@@ -11,7 +11,7 @@ pub(crate) enum Seg {
 }
 
 impl Seg {
-    fn matches(&self, name: &str) -> bool {
+    pub(crate) fn matches(&self, name: &str) -> bool {
         match self {
             Seg::Lit(l) => l == name,
             Seg::Wild(p) => wild(p, &name.chars().collect::<Vec<_>>()),

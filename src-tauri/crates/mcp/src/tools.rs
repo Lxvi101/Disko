@@ -44,9 +44,9 @@ pub fn definitions() -> Value {
             "query": { "type": "string" },
             "limit": { "type": "integer", "description": "Default 30, max 300" },
         }), &["query"], true, false),
-        tool("clutter", "What Disko suggests removing, largest first. Each finding has an id for `clean`. Kept items are hidden.", json!({
+        tool("clutter", "What Disko suggests removing, largest first. Each finding has an id for `clean` and says how `clean` removes it (`trash`, or the owning tool's `command`). Kept items are hidden.", json!({
             "category": { "description": "A category or list of categories", "anyOf": [cat.clone(), cats.clone()] },
-            "safety": { "type": "string", "enum": ["safe", "review"], "description": "safe = rebuildable, deleted; review = user's call, goes to the Trash" },
+            "safety": { "type": "string", "enum": ["safe", "review"], "description": "safe = rebuildable, regrows; review = the user's call. Through this server both go to the Trash." },
             "query": { "type": "string", "description": "Substring of title, rule or path" },
             "min_bytes": { "type": "integer", "description": "Default 1000000 (1 MB); 0 for everything" },
             "limit": { "type": "integer", "description": "Default 40, max 500" },
@@ -55,10 +55,9 @@ pub fn definitions() -> Value {
         tool("explain", "Everything Disko knows about one path: size, last used, category, rule, owner app/tool, regrows, keep status, learned rules, whether it's protected.", json!({
             "path": { "type": "string", "description": "Absolute path or ~/…" },
         }), &["path"], true, false),
-        tool("clean", "Remove findings (by id) and/or paths. Safe findings are deleted, review findings and plain paths go to the Trash (Undo via Finder › Put Back), tool-managed findings run the tool's own cleanup. The keep list, protected paths, in-use and admin-only items are skipped. Returns what was freed.", json!({
+        tool("clean", "Move findings (by id) and/or paths to the macOS Trash (Undo: Finder › Put Back, or Disko's Undo). Findings managed by a tool run that tool's own cleanup command instead. Never deletes anything permanently: emptying the Trash or permanent deletion is the user's call, in Disko. The keep list, protected paths, in-use and admin-only items are skipped. Returns what was moved/freed.", json!({
             "ids": { "type": "array", "items": { "type": "string" }, "description": "Finding ids from `clutter`" },
             "paths": { "type": "array", "items": { "type": "string" }, "description": "Absolute paths; moved to the Trash" },
-            "trash": { "type": "boolean", "description": "Move everything to the Trash, even safe findings" },
             "dry_run": { "type": "boolean", "description": "Only show what would happen" },
         }), &[], false, true),
         tool("apps", "Installed apps with app size, data size and last use, largest first.", json!({
@@ -76,31 +75,31 @@ pub fn definitions() -> Value {
             "pattern": { "type": "string", "description": "Absolute path or ~/ glob (`*`, `**`)" },
             "note": { "type": "string", "description": "Why, in the user's words" },
         }), &["pattern"], false, false),
-        tool("unkeep", "Remove a keep entry (by id or exact pattern).", json!({ "id": { "type": "string" } }), &["id"], false, false),
-        tool("add_rule", "Teach Disko a new source of clutter it missed (a tool cache, a build output folder). It shows up in `clutter` and can be used by routines. Returns what it matches right now.", json!({
-            "pattern": { "type": "string", "description": "~/ or absolute glob: ~/.turbo/cache, ~/Library/Caches/com.vendor.app, ~/**/.dart_tool" },
+        tool("unkeep", "Remove a keep entry an agent added (by id or exact pattern). Entries the user added can only be removed by the user, in Disko.", json!({ "id": { "type": "string" } }), &["id"], false, false),
+        tool("add_rule", "Teach Disko a new source of clutter it missed (a tool cache, a build output folder). Its findings show up in `clutter` as review items: `clean` moves them to the Trash. Agent rules are never deleted permanently and never run in routines; the user can promote one in Disko. Can't change the user's own rules. Returns what it matches right now.", json!({
+            "pattern": { "type": "string", "description": "Glob inside the home folder: ~/.turbo/cache, ~/Library/Caches/com.vendor.app, ~/**/.dart_tool. Not allowed: outside home, .git folders, ~/Library except Caches/<app> and Logs/<app>, credentials (.ssh, .aws, …). With `**`, the last part must be a known build/cache folder name (node_modules, target, .build, dist, .next, .dart_tool, …)." },
             "title": { "type": "string", "description": "Short human name: 'Turbo cache'" },
             "category": cat,
             "why": { "type": "string", "description": "One sentence of evidence: what creates it and why removing it is fine" },
             "regrows": { "type": "boolean", "description": "Comes back by itself / the tool recreates it" },
-            "safety": { "type": "string", "enum": ["safe", "review"], "description": "safe only for rebuildable data (deleted permanently)" },
+            "safety": { "type": "string", "enum": ["safe", "review"], "description": "Your assessment (safe = rebuildable). Agent rules are stored as review either way; only the user can make a rule safe." },
             "share": { "type": "boolean", "description": "Share anonymized with the community pack (only generic sources)" },
             "id": { "type": "string", "description": "Optional id; reuse an id to update a rule" },
             "dry_run": { "type": "boolean", "description": "Validate and preview matches without saving" },
-        }), &["pattern", "title", "category", "safety"], false, false),
+        }), &["pattern", "title", "category"], false, false),
         tool("remove_rule", "Forget a learned rule (by id).", json!({ "id": { "type": "string" } }), &["id"], false, false),
         tool("set_routine", "Create or change a routine ('clean X every N days'). With an existing id, only the fields given change (e.g. {id:'build-artifacts', enabled:true}). Only create or enable routines the user asked for.", json!({
             "id": { "type": "string" },
             "title": { "type": "string" },
             "categories": cats,
-            "rules": { "type": "array", "items": { "type": "string" }, "description": "Finding rule ids, prefixes, or learned rule ids" },
+            "rules": { "type": "array", "items": { "type": "string" }, "description": "Finding rule ids, prefixes, or the user's learned rule ids (agent and community rules never run in routines)" },
             "every_days": { "type": "integer" },
             "min_age_days": { "type": "integer", "description": "Only items untouched this long" },
             "enabled": { "type": "boolean" },
             "review": { "type": "boolean", "description": "Also take review items (to the Trash). Only if the user explicitly wants that." },
         }), &[], false, false),
         tool("remove_routine", "Delete a routine (by id).", json!({ "id": { "type": "string" } }), &["id"], false, false),
-        tool("run_routine", "Run a routine now (or, without id, every routine that's due). Returns what was freed and what was skipped and why.", json!({
+        tool("run_routine", "Run a routine now (or, without id, every routine that's due). Run from here, its items go to the Trash (or run the owning tool's cleanup); nothing is deleted permanently. Routines only take findings from Disko's built-in and the user's own rules. Returns what was moved/freed and what was skipped and why.", json!({
             "id": { "type": "string" },
             "dry_run": { "type": "boolean" },
         }), &[], false, true),
@@ -178,6 +177,28 @@ fn action_word(a: &Action) -> String {
     }
 }
 
+/// What `clean` (and `run_routine`) through this server does with a finding: the owning tool's
+/// command, or the Trash. Agents never delete permanently.
+fn mcp_how(f: &Finding) -> String {
+    match &f.action {
+        Action::Command { .. } => action_word(&f.action),
+        _ => "trash".into(),
+    }
+}
+
+/// Split findings into tool commands (`ids`) and everything else (`trash_ids`).
+fn trash_request(fs: &[&Finding]) -> CleanRequest {
+    let mut req = CleanRequest::default();
+    for f in fs {
+        if matches!(f.action, Action::Command { .. }) {
+            req.ids.push(f.id.clone());
+        } else {
+            req.trash_ids.push(f.id.clone());
+        }
+    }
+    req
+}
+
 fn finding_row(f: &Finding, now: i64) -> Value {
     let mut m = obj(json!({ "id": f.id, "title": f.title }));
     if let Some(d) = &f.detail {
@@ -186,7 +207,7 @@ fn finding_row(f: &Finding, now: i64) -> Value {
     m.insert("category".into(), kebab(f.category));
     sized(&mut m, f.bytes);
     m.insert("safety".into(), kebab(f.safety));
-    m.insert("action".into(), json!(action_word(&f.action)));
+    m.insert("action".into(), json!(mcp_how(f)));
     if f.regrows {
         m.insert("regrows".into(), json!(true));
     }
@@ -312,7 +333,7 @@ pub fn call(srv: &Server, name: &str, a: &Value) -> Result<Value, String> {
         "keep" => keep(srv, a),
         "unkeep" => {
             let id = s(a, "id").ok_or("`id` is required.")?;
-            srv.store().apply(MemoryOp::Unkeep { id: id.to_string() })?;
+            srv.store().apply(MemoryOp::Unkeep { id: id.to_string(), source: Some(Source::Agent) })?;
             srv.backend().memory_changed();
             Ok(json!({ "removed": id }))
         }
@@ -489,7 +510,8 @@ fn clean(srv: &Server, a: &Value) -> Result<Value, String> {
     if ids.len() + paths.len() > 500 {
         return Err("At most 500 items per call.".into());
     }
-    let to_trash = b(a, "trash").unwrap_or(false);
+    // Through MCP nothing is deleted permanently: findings go to the Trash (or run their tool's
+    // own cleanup command), whatever their action or a `trash` flag say.
     let dry = b(a, "dry_run").unwrap_or(false);
     let findings = srv.backend().clutter()?;
     let keep = srv.store().keep().clone();
@@ -511,16 +533,12 @@ fn clean(srv: &Server, a: &Value) -> Result<Value, String> {
         if let Some(p) = f.paths.iter().find(|p| is_protected(Path::new(p))) {
             return skip(skipped, &f.id, &format!("{} is protected", p));
         }
-        if matches!(f.action, Action::Delete) && f.safety != Safety::Safe {
-            return skip(skipped, &f.id, "only safe findings may be deleted permanently");
-        }
-        let how = if to_trash && !matches!(f.action, Action::Command { .. }) {
-            req.trash_ids.push(f.id.clone());
-            "trash".to_string()
-        } else {
+        let how = mcp_how(f);
+        if matches!(f.action, Action::Command { .. }) {
             req.ids.push(f.id.clone());
-            action_word(&f.action)
-        };
+        } else {
+            req.trash_ids.push(f.id.clone());
+        }
         planned_bytes += f.bytes;
         plan.push(json!({ "id": f.id, "title": f.title, "size": fmt_bytes(f.bytes), "how": how }));
     };
@@ -532,7 +550,7 @@ fn clean(srv: &Server, a: &Value) -> Result<Value, String> {
         }
     }
     for p in &paths {
-        // A path that is exactly a finding is cleaned as that finding (safe ones get deleted).
+        // A path that is exactly a finding is cleaned as that finding (to the Trash, or its tool's command).
         if let Some(f) = findings.iter().find(|f| f.paths.len() == 1 && &f.paths[0] == p) {
             if !req.ids.contains(&f.id) && !req.trash_ids.contains(&f.id) {
                 take(f, &mut req, &mut skipped, &mut plan);
@@ -572,7 +590,7 @@ fn clean(srv: &Server, a: &Value) -> Result<Value, String> {
             "trashed".into(),
             json!(r.trashed.iter().take(50).map(|x| json!({ "from": x.from, "to": x.to, "size": fmt_bytes(x.bytes) })).collect::<Vec<_>>()),
         );
-        m.insert("undo".into(), json!("Trashed items can be put back (Finder › Put Back, or Disko's Undo)."));
+        m.insert("undo".into(), json!("Trashed items can be put back (Finder › Put Back, or Disko's Undo). Space is only freed for good when the user empties the Trash."));
     }
     if !r.failed.is_empty() {
         m.insert("failed".into(), json!(r.failed.iter().map(|f| json!({ "path": f.path, "error": f.error })).collect::<Vec<_>>()));
@@ -736,20 +754,23 @@ fn keep(srv: &Server, a: &Value) -> Result<Value, String> {
 }
 
 fn add_rule(srv: &Server, a: &Value) -> Result<Value, String> {
-    let rule = LearnedRule {
+    let mut rule = LearnedRule {
         id: s(a, "id").unwrap_or("").to_string(),
         pattern: s(a, "pattern").ok_or("`pattern` is required.")?.trim_end_matches('/').to_string(),
         category: category(s(a, "category").ok_or("`category` is required.")?)?,
         title: s(a, "title").ok_or("`title` is required.")?.to_string(),
         why: s(a, "why").unwrap_or("").to_string(),
         regrows: b(a, "regrows").unwrap_or(false),
-        safety: safety(s(a, "safety").ok_or("`safety` is required.")?)?,
+        safety: s(a, "safety").map(safety).transpose()?.unwrap_or(Safety::Review),
         source: Source::Agent,
         added: 0,
         shared: b(a, "share").unwrap_or(false),
     };
+    let asked_safe = rule.safety == Safety::Safe;
+    // Agent rules are always review (to the Trash, never in routines); see disko_memory::rules.
+    disko_memory::rules::normalize_rule(&mut rule);
     let home = srv.store().home().to_path_buf();
-    disko_memory::validate_rule(&rule, &disko_core::paths::home())?;
+    disko_memory::validate_rule(&rule, &home)?;
     let keep = srv.store().keep().clone();
     let glob = Glob::new(&rule.pattern, &home)?;
     // Preview: on disk for plain patterns, from the index for `**` ones.
@@ -759,13 +780,13 @@ fn add_rule(srv: &Server, a: &Value) -> Result<Value, String> {
             .search(name, 500)
             .unwrap_or_default()
             .into_iter()
-            .filter(|n| glob.matches(&n.path))
+            .filter(|n| glob.matches(&n.path) && !disko_memory::rules::path_off_limits(Path::new(&n.path), &home))
             .map(|n| (n.path, n.bytes))
             .collect()
     } else {
         glob.expand(200)
             .into_iter()
-            .filter(|p| !is_protected(p))
+            .filter(|p| !is_protected(p) && !disko_memory::rules::path_off_limits(p, &home))
             .map(|p| {
                 let bytes = disko_memory::rules::measure(&p).0;
                 (p.to_string_lossy().to_string(), bytes)
@@ -785,12 +806,15 @@ fn add_rule(srv: &Server, a: &Value) -> Result<Value, String> {
     let shared = rule.shared;
     let mem = srv.store().apply_with(MemoryOp::AddRule { rule: rule.clone() }, Some(total))?;
     srv.backend().memory_changed();
-    let saved = mem.rules.iter().find(|r| r.pattern == rule.pattern).cloned().ok_or("Rule wasn't saved.")?;
+    let saved = mem.rules.iter().find(|r| r.pattern == rule.pattern && r.source == Source::Agent).cloned().ok_or("Rule wasn't saved.")?;
     let mut out = obj(json!({
         "rule": { "id": saved.id, "finding_rule": disko_memory::rules::finding_rule(&saved), "pattern": saved.pattern, "safety": kebab(saved.safety) },
         "matches": preview,
-        "next": format!("Its findings appear in clutter (query: \"learned.{}\"). Add it to a routine with set_routine(rules: [\"{}\"]) if the user wants it cleaned regularly.", saved.id, saved.id),
+        "next": format!("Its findings appear in clutter (query: \"learned.{}\"); clean(ids) moves them to the Trash. Routines don't take agent rules; if the user wants it cleaned regularly, they can make it their own rule in Disko.", saved.id),
     }));
+    if asked_safe {
+        out.insert("note".into(), json!("Saved as review: rules from agents never delete permanently. The user can mark it safe in Disko."));
+    }
     if shared {
         let ob = srv.store().outbox();
         let generalized = disko_memory::share::generalize(&saved.pattern, &home, &home.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default());
@@ -885,8 +909,9 @@ fn run_routine(srv: &Server, a: &Value, t: i64) -> Result<Value, String> {
                 "skipped": skipped }));
             continue;
         }
-        let req = CleanRequest { ids: chosen.iter().map(|f| f.id.clone()).collect(), ..Default::default() };
-        let res = if req.ids.is_empty() { Ok(Default::default()) } else { srv.backend().clean(&req) };
+        // Started by an agent: to the Trash (or the tool's own cleanup), never deleted permanently.
+        let req = trash_request(&chosen);
+        let res = if chosen.is_empty() { Ok(Default::default()) } else { srv.backend().clean(&req) };
         match res {
             Ok(res) => {
                 let freed = res.freed;

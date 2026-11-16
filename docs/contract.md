@@ -34,6 +34,8 @@ full disk), settings/memory in `~/Library/Application Support/app.disko`. Nothin
 - `Safety::Review`: `Action::Trash` (macOS Trash, Undo via `ops::put_back`). One tap, Undo toast.
 - Root-owned: `admin: true` → one macOS authorization prompt for the batch (`ops::delete_as_admin`).
 - Keep list always wins. In-use paths (`busy`) are skipped.
+- Agents (MCP) never delete permanently: findings go to the Trash or run the owning tool's command.
+  Rules from agents and the community pack are always `Review` and never run in routines.
 - After any removal the engine drops those paths from its tree immediately and the UI updates
   without a rescan. Changes made outside Disko arrive through FSEvents within ~1 s.
 
@@ -89,7 +91,7 @@ Memory   { keep: KeepEntry[], rules: LearnedRule[], routines: Routine[], communi
 KeepEntry   { id, pattern, note?, source: "user"|"agent", added: number }      // pattern: absolute path or glob with ~
 LearnedRule { id, pattern, category, title, why, regrows, safety, source: "user"|"agent"|"community", added, shared: boolean }
 Routine     { id, title, select: { categories?: Category[], rules?: string[] }, every_days, min_age_days, enabled, last_run?: number, last_freed?: number }
-MemoryOp    { type: "keep", pattern, note? } | { type: "unkeep", id } | { type: "add-rule", rule }
+MemoryOp    { type: "keep", pattern, note? } | { type: "unkeep", id, source?: "user"|"agent" } | { type: "add-rule", rule }
             | { type: "remove-rule", id } | { type: "set-routine", routine } | { type: "remove-routine", id }
             | { type: "community", enabled }
 ```

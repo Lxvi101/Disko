@@ -91,9 +91,12 @@ fn read(path: &Path) -> (Memory, bool) {
             .map(|a| a.iter().filter_map(|x| serde_json::from_value(x.clone()).ok()).collect())
             .unwrap_or_default()
     }
+    let mut rules: Vec<LearnedRule> = list(&v, "rules");
+    // Whatever the file says, agent and community rules are `review` (see rules::effective_safety).
+    rules.iter_mut().for_each(rules::normalize_rule);
     let m = Memory {
         keep: list(&v, "keep"),
-        rules: list(&v, "rules"),
+        rules,
         routines: list(&v, "routines"),
         community: v.get("community").and_then(|c| serde_json::from_value(c.clone()).ok()).unwrap_or_default(),
     };
@@ -193,15 +196,20 @@ impl Store {
     }
 
     /// Rules to scan with: the user's/agents' rules, plus the community pack when enabled (minus
-    /// community rules with the same pattern as a local one).
+    /// community rules with the same pattern as a local one). Rules that don't pass today's
+    /// validation (e.g. written by an older Disko or edited by hand) stay in memory.json, where the
+    /// user can see and remove them, but aren't used.
     pub fn active_rules(&mut self) -> Vec<LearnedRule> {
         self.refresh();
-        let mut v = self.mem.rules.clone();
+        let home = self.home.clone();
+        let mut v: Vec<LearnedRule> = self.mem.rules.iter().filter(|r| rules::validate_rule(r, &home).is_ok()).cloned().collect();
         if self.mem.community.enabled {
-            let own: Vec<String> = v.iter().map(|r| r.pattern.clone()).collect();
-            let extra: Vec<LearnedRule> = self.pack().rules.iter().filter(|r| !own.contains(&r.pattern)).cloned().collect();
+            let own: Vec<String> = v.iter().map(|r| r.pattern.to_lowercase()).collect();
+            let extra: Vec<LearnedRule> =
+                self.pack().rules.iter().filter(|r| !own.contains(&r.pattern.to_lowercase())).cloned().collect();
             v.extend(extra);
         }
+        v.iter_mut().for_each(rules::normalize_rule);
         v
     }
 
@@ -326,7 +334,7 @@ fn apply_op(m: &mut Memory, ctx: &Ctx, op: MemoryOp, bytes: Option<u64>) -> Resu
             {
                 return Err("Too broad: that would keep everything.".into());
             }
-            if let Some(e) = m.keep.iter_mut().find(|e| e.pattern == pattern) {
+            if let Some(e) = m.keep.iter_mut().find(|e| e.pattern.to_lowercase() == pattern.to_lowercase()) {
                 if note.is_some() {
                     e.note = note;
                 }
@@ -340,13 +348,22 @@ fn apply_op(m: &mut Memory, ctx: &Ctx, op: MemoryOp, bytes: Option<u64>) -> Resu
                 added: t,
             });
         }
-        MemoryOp::Unkeep { id } => {
-            let before = m.keep.len();
+        MemoryOp::Unkeep { id, source } => {
             let id = id.trim().trim_end_matches('/');
-            m.keep.retain(|e| e.id != id && e.pattern != id);
-            if m.keep.len() == before {
+            let hit = |e: &KeepEntry| e.id == id || e.pattern == id;
+            if !m.keep.iter().any(hit) {
                 return Err(format!("Nothing on the keep list matches `{}`.", id));
             }
+            // An agent may only take back what an agent kept; the user's keep entries are theirs.
+            if source == Some(Source::Agent) {
+                if let Some(e) = m.keep.iter().find(|e| hit(e) && e.source != Source::Agent) {
+                    return Err(format!(
+                        "`{}` is on the keep list because the user put it there; only they can remove it (in Disko).",
+                        e.pattern
+                    ));
+                }
+            }
+            m.keep.retain(|e| !hit(e));
         }
         MemoryOp::AddRule { mut rule } => {
             rule.pattern = rule.pattern.trim().trim_end_matches('/').to_string();
@@ -354,7 +371,18 @@ fn apply_op(m: &mut Memory, ctx: &Ctx, op: MemoryOp, bytes: Option<u64>) -> Resu
             if matches!(rule.source, Source::Builtin | Source::Community) {
                 rule.source = Source::User;
             }
-            let existing = m.rules.iter().position(|r| (!rule.id.is_empty() && r.id == rule.id) || r.pattern == rule.pattern);
+            rules::normalize_rule(&mut rule);
+            let same = |r: &LearnedRule| (!rule.id.is_empty() && r.id == rule.id) || r.pattern.to_lowercase() == rule.pattern.to_lowercase();
+            // Agents can't replace or shadow a rule the user made.
+            if rule.source != Source::User {
+                if let Some(u) = m.rules.iter().find(|r| same(r) && r.source == Source::User) {
+                    return Err(format!(
+                        "The user already has a rule `{}` for {}; agents can't change it. Pick another id/pattern or ask the user.",
+                        u.id, u.pattern
+                    ));
+                }
+            }
+            let existing = m.rules.iter().position(same);
             if rule.id.is_empty() {
                 rule.id = match existing {
                     Some(i) => m.rules[i].id.clone(),
@@ -368,7 +396,7 @@ fn apply_op(m: &mut Memory, ctx: &Ctx, op: MemoryOp, bytes: Option<u64>) -> Resu
                     }
                 };
             }
-            rules::validate_rule(&rule, &disko_core::paths::home())?;
+            rules::validate_rule(&rule, &ctx.home)?;
             if rule.added == 0 {
                 rule.added = existing.map(|i| m.rules[i].added).unwrap_or(t);
             }
@@ -492,7 +520,7 @@ mod tests {
         assert_eq!(other.memory().keep[0].source, Source::Agent);
         let id = other.memory().keep[0].id.clone();
         std::thread::sleep(std::time::Duration::from_millis(5));
-        other.apply(MemoryOp::Unkeep { id }).unwrap();
+        other.apply(MemoryOp::Unkeep { id, source: Some(Source::Agent) }).unwrap();
         assert!(!s.is_kept("/Users/me/Dev/app/node_modules/x"));
 
         let raw: Value = serde_json::from_slice(&std::fs::read(d.join(FILE)).unwrap()).unwrap();
@@ -508,7 +536,7 @@ mod tests {
         assert!(s.apply(MemoryOp::AddRule { rule: rule("~/*", "All") }).is_err());
         assert!(s.apply(MemoryOp::Keep { pattern: "~".into(), note: None, source: None }).is_err());
         assert!(s.apply(MemoryOp::Keep { pattern: "relative".into(), note: None, source: None }).is_err());
-        assert!(s.apply(MemoryOp::Unkeep { id: "nope".into() }).is_err());
+        assert!(s.apply(MemoryOp::Unkeep { id: "nope".into(), source: None }).is_err());
         assert!(s.apply(MemoryOp::RemoveRoutine { id: "nope".into() }).is_err());
         let bad = Routine { id: String::new(), title: "x".into(), select: Default::default(), every_days: 2, min_age_days: 0, enabled: true, review: false, last_run: None, last_freed: None };
         assert!(s.apply(MemoryOp::SetRoutine { routine: bad }).is_err());
@@ -608,6 +636,75 @@ mod tests {
         s.apply(MemoryOp::Community { enabled: false }).unwrap();
         assert!(!s.refresh_community_with(20 * DAY, true, |_| panic!("disabled")).unwrap());
         assert_eq!(s.memory().community.rules, 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn agents_cant_touch_user_rules_or_keeps() {
+        let d = tempdir("store-agent-guard");
+        let mut s = Store::open(&d, "/Users/me");
+        let mut mine = rule("~/.turbo/cache", "Turbo cache");
+        mine.source = Source::User;
+        let m = s.apply(MemoryOp::AddRule { rule: mine }).unwrap();
+        assert_eq!((m.rules[0].source, m.rules[0].safety), (Source::User, Safety::Safe));
+
+        // Same id, same pattern (any case): refused for agents.
+        let mut by_id = rule("~/.other/cache", "Other");
+        by_id.id = "turbo-cache".into();
+        assert!(s.apply(MemoryOp::AddRule { rule: by_id }).unwrap_err().contains("user already has"));
+        assert!(s.apply(MemoryOp::AddRule { rule: rule("~/.TURBO/cache/", "Shadow") }).is_err());
+        let m = s.memory();
+        assert_eq!(m.rules.len(), 1);
+        assert_eq!(m.rules[0].safety, Safety::Safe);
+
+        // An agent rule is saved as review, whatever it asked for; it may update its own rule.
+        let m = s.apply(MemoryOp::AddRule { rule: rule("~/.bun/install/cache", "Bun") }).unwrap();
+        let bun = m.rules.iter().find(|r| r.id == "bun").unwrap();
+        assert_eq!((bun.source, bun.safety), (Source::Agent, Safety::Review));
+        s.apply(MemoryOp::AddRule { rule: LearnedRule { id: "bun".into(), ..rule("~/.bun/install/cache", "Bun cache") } }).unwrap();
+        assert_eq!(s.memory().rules.iter().filter(|r| r.id == "bun").count(), 1);
+        // The user may take over an agent's rule and make it safe.
+        let m = s.apply(MemoryOp::AddRule { rule: LearnedRule { id: "bun".into(), source: Source::User, ..rule("~/.bun/install/cache", "Bun") } }).unwrap();
+        assert_eq!(m.rules.iter().find(|r| r.id == "bun").unwrap().safety, Safety::Safe);
+
+        // Agent-sourced unkeep only removes agent entries.
+        s.apply(MemoryOp::Keep { pattern: "~/Thesis".into(), note: None, source: None }).unwrap();
+        s.apply(MemoryOp::Keep { pattern: "~/Dev/app/node_modules".into(), note: None, source: Some(Source::Agent) }).unwrap();
+        let err = s.apply(MemoryOp::Unkeep { id: "~/Thesis".into(), source: Some(Source::Agent) }).unwrap_err();
+        assert!(err.contains("user put it there"), "{}", err);
+        assert!(s.is_kept("/Users/me/Thesis/ch1.tex"));
+        s.apply(MemoryOp::Unkeep { id: "~/Dev/app/node_modules".into(), source: Some(Source::Agent) }).unwrap();
+        // The user (no source) can remove their own.
+        s.apply(MemoryOp::Unkeep { id: "~/Thesis".into(), source: None }).unwrap();
+        assert!(s.memory().keep.is_empty());
+        // Keeping the same path in another case doesn't add a duplicate.
+        s.apply(MemoryOp::Keep { pattern: "~/Dev/App".into(), note: None, source: None }).unwrap();
+        s.apply(MemoryOp::Keep { pattern: "~/dev/app".into(), note: None, source: Some(Source::Agent) }).unwrap();
+        assert_eq!(s.memory().keep.len(), 1);
+        assert!(s.is_kept("/Users/me/DEV/APP/x"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn loaded_rules_are_normalized_and_invalid_ones_inactive() {
+        let d = tempdir("store-load-guard");
+        std::fs::write(
+            d.join(FILE),
+            r#"{"schema_version":1,"community":{"enabled":false},"rules":[
+                {"id":"a","pattern":"~/Documents/Thesis","category":"cache","title":"x","safety":"safe","source":"agent"},
+                {"id":"c","pattern":"~/.x/cache","category":"cache","title":"x","safety":"safe","source":"community"},
+                {"id":"u","pattern":"~/.gradle/caches","category":"packages","title":"x","safety":"safe","source":"user"},
+                {"id":"git","pattern":"~/Dev/app/.git","category":"build","title":"x","safety":"safe","source":"user"},
+                {"id":"sys","pattern":"/Library/Caches/x","category":"cache","title":"x","safety":"safe","source":"user"}]}"#,
+        )
+        .unwrap();
+        let mut s = Store::open(&d, "/Users/me");
+        let m = s.memory();
+        assert_eq!(m.rules.len(), 5, "kept in the file so the user sees them");
+        let safety = |id: &str| m.rules.iter().find(|r| r.id == id).unwrap().safety;
+        assert_eq!((safety("a"), safety("c"), safety("u")), (Safety::Review, Safety::Review, Safety::Safe));
+        let active: Vec<String> = s.active_rules().into_iter().map(|r| r.id).collect();
+        assert_eq!(active, vec!["a", "c", "u"], "invalid rules aren't scanned with");
         let _ = std::fs::remove_dir_all(&d);
     }
 

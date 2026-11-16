@@ -1,5 +1,6 @@
 //! The keep list, compiled for fast checks. The keep list always wins: a finding is kept when one
-//! of its paths is a kept path, is inside one, or contains one.
+//! of its paths is a kept path, is inside one, or contains one. Matching ignores case, like APFS:
+//! keeping `~/Dev/App` also keeps `~/dev/app/node_modules`.
 
 use crate::{Glob, KeepEntry};
 use disko_core::Finding;
@@ -12,8 +13,12 @@ pub struct KeepSet {
 
 impl KeepSet {
     pub fn new(entries: &[KeepEntry], home: &Path) -> KeepSet {
+        let home = std::path::PathBuf::from(home.to_string_lossy().to_lowercase());
         KeepSet {
-            entries: entries.iter().filter_map(|e| Glob::new(&e.pattern, home).ok().map(|g| (e.clone(), g))).collect(),
+            entries: entries
+                .iter()
+                .filter_map(|e| Glob::new(&e.pattern.to_lowercase(), &home).ok().map(|g| (e.clone(), g)))
+                .collect(),
         }
     }
 
@@ -23,7 +28,11 @@ impl KeepSet {
 
     /// The keep entry protecting `path`, if any.
     pub fn kept_by(&self, path: &str) -> Option<&KeepEntry> {
-        self.entries.iter().find(|(_, g)| g.matches_or_inside(path) || g.may_match_below(path)).map(|(e, _)| e)
+        if self.entries.is_empty() {
+            return None;
+        }
+        let path = path.to_lowercase();
+        self.entries.iter().find(|(_, g)| g.matches_or_inside(&path) || g.may_match_below(&path)).map(|(e, _)| e)
     }
 
     pub fn is_kept(&self, path: &str) -> bool {
@@ -58,5 +67,34 @@ mod tests {
         assert!(k.is_kept("/Users/me/Models/llama.gguf"));
         assert!(k.is_kept("/Users/me/Models")); // could contain a match
         assert!(!k.is_kept("/Users/me/Models2"));
+    }
+
+    #[test]
+    fn keep_ignores_case_like_apfs() {
+        let k = KeepSet::new(&[e("~/Dev/App/node_modules"), e("/Users/Me/Models/*.GGUF")], Path::new("/Users/me"));
+        assert!(k.is_kept("/Users/me/dev/app/NODE_MODULES"));
+        assert!(k.is_kept("/users/ME/Dev/App/node_modules/.cache"));
+        assert!(k.is_kept("/Users/me/DEV/app")); // contains a kept path
+        assert!(k.is_kept("/Users/me/models/llama.gguf"));
+        assert!(!k.is_kept("/Users/me/Dev/other/node_modules"));
+        let f = disko_core::Finding {
+            id: "f".into(),
+            rule: "build.node-modules".into(),
+            category: disko_core::Category::Build,
+            title: "x".into(),
+            detail: None,
+            icon: "box".into(),
+            paths: vec!["/USERS/me/dev/APP/node_modules".into()],
+            bytes: 1,
+            last_used: None,
+            safety: disko_core::Safety::Safe,
+            action: disko_core::Action::Delete,
+            regrows: true,
+            why: String::new(),
+            busy: None,
+            admin: false,
+            source: Source::Builtin,
+        };
+        assert_eq!(k.finding_kept_by(&f).map(|x| x.pattern.as_str()), Some("~/Dev/App/node_modules"));
     }
 }
