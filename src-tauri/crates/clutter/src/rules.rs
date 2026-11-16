@@ -275,6 +275,8 @@ const NOT_PROJECTS: &[&str] = &[
     ".yarn", ".deno", ".volta", ".fnm", ".android", ".pub-cache", ".dartServer", ".rbenv", ".gem", ".sdkman", ".asdf", ".mise", ".cache/uv", ".cache/pip", ".cache/huggingface",
     ".cache/pypoetry", ".cache/pre-commit", ".cache/bazel", ".cache/go-build", ".cache/ms-playwright", ".cache/puppeteer", ".swiftpm", ".orbstack", ".docker", "Applications",
     "Pictures", "Music", "Movies",
+    // Global package installs: their node_modules are installed CLIs, not build output.
+    ".config/yarn", ".config/pnpm", ".npm-global", ".npm-packages", ".node_modules", ".local/share/pnpm",
 ];
 
 /// Inside home, outside tool stores, app bundles, site-packages, other dependencies.
@@ -366,6 +368,8 @@ mod tests {
         assert!(!in_projects(Path::new("/Users/t/dev/app/node_modules/x/node_modules"), home));
         assert!(!in_projects(Path::new("/Users/t/dev/py/.venv/lib/python3.12/site-packages/x/__pycache__"), home));
         assert!(!in_projects(Path::new("/opt/homebrew/lib/node_modules"), home));
+        assert!(!in_projects(Path::new("/Users/t/.config/yarn/global/node_modules"), home));
+        assert!(!in_projects(Path::new("/Users/t/.npm-global/lib/node_modules"), home));
         assert!(in_projects(Path::new("/Users/t/.codex/worktrees/a/proj/target"), home));
     }
 }
