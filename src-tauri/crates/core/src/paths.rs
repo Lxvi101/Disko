@@ -30,64 +30,109 @@ pub fn short(path: &str) -> String {
     }
 }
 
-/// Paths that no clean, rule or agent may ever remove, whatever they say. Checked by `ops`.
-/// (Exact paths, or anything inside them.)
+/// Lower-cased string form, for case-insensitive comparisons (APFS is case-insensitive).
+fn lc(p: &Path) -> String {
+    p.to_string_lossy().to_lowercase()
+}
+
+fn inside(p: &str, root: &str) -> bool {
+    p == root || p.starts_with(&format!("{}/", root.trim_end_matches('/')))
+}
+
+/// Paths that no clean, rule or agent may ever remove, whatever they say. Checked by `ops`
+/// against both the path as given and its resolved form. Case-insensitive.
 pub fn is_protected(path: &Path) -> bool {
+    use std::path::Component;
     let h = home();
-    let p = path;
-    if !p.is_absolute() || p.components().count() < 3 {
+    if !path.is_absolute() || path.components().count() < 3 {
         return true; // "/", "/Users", relative paths
     }
+    if path.components().any(|c| matches!(c, Component::ParentDir | Component::CurDir)) {
+        return true; // "~/Desktop/../.ssh" style paths are never accepted
+    }
+    let p = lc(path);
+    let hh = |rel: &str| lc(&h.join(rel));
     let exact_or_inside = [
-        PathBuf::from("/System"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/usr/lib"),
-        PathBuf::from("/usr/libexec"),
-        PathBuf::from("/usr/sbin"),
-        PathBuf::from("/bin"),
-        PathBuf::from("/sbin"),
-        PathBuf::from("/private/etc"),
-        PathBuf::from("/Library/Keychains"),
-        h.join("Library/Keychains"),
-        h.join("Library/Mobile Documents"),
-        h.join("Library/CloudStorage"),
-        h.join("Library/Mail"),
-        h.join("Library/Messages"),
-        h.join("Library/Photos"),
-        h.join(".ssh"),
-        h.join(".gnupg"),
+        "/system".to_string(),
+        "/usr/bin".into(),
+        "/usr/lib".into(),
+        "/usr/libexec".into(),
+        "/usr/sbin".into(),
+        "/usr/share".into(),
+        "/bin".into(),
+        "/sbin".into(),
+        "/etc".into(),
+        "/private/etc".into(),
+        "/volumes".into(),
+        "/library/keychains".into(),
+        hh("Library/Keychains"),
+        hh("Library/Mobile Documents"),
+        hh("Library/CloudStorage"),
+        hh("Library/Mail"),
+        hh("Library/Messages"),
+        hh("Library/Photos"),
+        hh("Library/Safari"),
+        hh("Library/Calendars"),
+        hh("Library/Application Support/AddressBook"),
+        hh("Library/Group Containers/group.com.apple.notes"),
+        hh("Library/Accounts"),
+        hh(".ssh"),
+        hh(".gnupg"),
+        hh(".aws"),
+        hh(".kube"),
+        hh(".config/gh"),
+        hh(".docker/config.json"),
+        hh(".password-store"),
     ];
-    if exact_or_inside.iter().any(|x| p.starts_with(x)) {
+    if exact_or_inside.iter().any(|x| inside(&p, x)) {
         return true;
     }
     // Whole top-level user folders and the home itself.
     let exact = [
-        h.clone(),
-        h.join("Library"),
-        h.join("Documents"),
-        h.join("Desktop"),
-        h.join("Downloads"),
-        h.join("Pictures"),
-        h.join("Movies"),
-        h.join("Music"),
-        h.join("Applications"),
-        h.join("Library/Application Support"),
-        h.join("Library/Caches"),
-        h.join("Library/Containers"),
-        h.join("Library/Group Containers"),
-        h.join("Library/Preferences"),
-        h.join(".Trash"),
-        PathBuf::from("/Applications"),
-        PathBuf::from("/Library"),
-        PathBuf::from("/Library/Application Support"),
-        PathBuf::from("/Library/Caches"),
-        PathBuf::from("/private/var"),
-        PathBuf::from("/opt/homebrew"),
-        PathBuf::from("/usr/local"),
+        lc(&h),
+        hh("Library"),
+        hh("Documents"),
+        hh("Desktop"),
+        hh("Downloads"),
+        hh("Pictures"),
+        hh("Movies"),
+        hh("Music"),
+        hh("Applications"),
+        hh("Developer"),
+        hh("Development"),
+        hh("Library/Application Support"),
+        hh("Library/Caches"),
+        hh("Library/Containers"),
+        hh("Library/Group Containers"),
+        hh("Library/Preferences"),
+        hh("Library/Developer"),
+        hh(".Trash"),
+        hh(".config"),
+        hh(".local"),
+        hh(".cache"),
+        "/applications".into(),
+        "/library".into(),
+        "/library/application support".into(),
+        "/library/caches".into(),
+        "/private".into(),
+        "/private/var".into(),
+        "/private/tmp".into(),
+        "/opt".into(),
+        "/opt/homebrew".into(),
+        "/usr/local".into(),
+        "/users".into(),
     ];
-    if exact.iter().any(|x| p == x) {
+    if exact.iter().any(|x| &p == x) {
         return true;
     }
-    let s = p.to_string_lossy();
-    s.ends_with(".photoslibrary") || s.ends_with("/.git") || s.contains(".photoslibrary/")
+    // Repositories' history and photo libraries, wherever they are.
+    p.ends_with(".photoslibrary") || p.contains(".photoslibrary/") || p.ends_with("/.git") || p.contains("/.git/")
+}
+
+/// `path` with its parent folder resolved (symlinks, case), or None when the parent is gone.
+/// The last component itself is not followed, so a symlink is judged as the link.
+pub fn resolved(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let name = path.file_name()?;
+    Some(std::fs::canonicalize(parent).ok()?.join(name))
 }

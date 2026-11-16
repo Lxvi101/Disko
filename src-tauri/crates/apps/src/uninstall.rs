@@ -94,8 +94,24 @@ pub fn uninstall_with(env: &Env, app_paths: &[String], remover: &dyn Remover, al
             let bytes = size::bytes(p);
             match remover.trash(p) {
                 Ok(to) => {
-                    out.result.freed += bytes;
+                    // Trash frees nothing yet; bytes are reported in `trashed`.
                     out.result.trashed.push(Trashed { from: s(p), to: s(&to), bytes });
+                }
+                // The app itself needs a password: ask now, and touch its data only if it's gone.
+                Err(_) if i == 0 && needs_admin(p) => {
+                    let res = if allow_admin { remover.delete_as_admin(std::slice::from_ref(p)) } else { Err("Needs an administrator password.".into()) };
+                    match res {
+                        Ok(()) => {
+                            out.result.freed += bytes;
+                            out.deleted.push(s(p));
+                            out.notes.push(format!("{} was owned by the system, so it was deleted with your administrator password; it can't be put back.", app.name));
+                        }
+                        Err(e) => {
+                            out.result.failed.push(CleanFailure { path: s(p), error: e });
+                            app_failed.insert(app.path.clone());
+                            break;
+                        }
+                    }
                 }
                 Err(_) if needs_admin(p) => admin_queue.push((p.clone(), bytes, app.path.clone())),
                 Err(e) => {
@@ -126,12 +142,12 @@ pub fn uninstall_with(env: &Env, app_paths: &[String], remover: &dyn Remover, al
                     out.result.freed += b;
                     out.deleted.push(s(p));
                 }
-                out.notes.push(format!("{} item(s) owned by the system were deleted with your administrator password; they can't be put back.", admin_queue.len()));
+                out.notes.push(format!("{} data item(s) owned by the system were deleted with your administrator password; they can't be put back.", admin_queue.len()));
             }
             Err(e) => {
-                for (p, _, app) in &admin_queue {
+                // The apps themselves are gone; only some root-owned data stays behind.
+                for (p, _, _) in &admin_queue {
                     out.result.failed.push(CleanFailure { path: s(p), error: e.clone() });
-                    out.result.removed.retain(|r| r != app);
                 }
             }
         }
@@ -191,7 +207,8 @@ mod tests {
         // "Acme" vendor folder is claimed by Foo and Bar alike: shared, kept.
         assert!(lib.join("Application Support/Acme").exists());
         assert_eq!(r.result.trashed.len(), 3);
-        assert!(r.result.freed > 0);
+        assert_eq!(r.result.freed, 0, "Trash frees nothing yet");
+        assert!(r.result.trashed.iter().map(|t| t.bytes).sum::<u64>() > 0);
         // Adobe app refused with a pointer to Adobe's uninstaller; unknown path fails.
         assert!(adobe.join("Adobe Thing 2026.app").exists());
         assert!(r.notes.iter().any(|n| n.contains("Adobe")));

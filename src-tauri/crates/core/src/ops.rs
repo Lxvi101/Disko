@@ -27,7 +27,8 @@ pub fn allocated(path: &Path) -> u64 {
 }
 
 fn guard(path: &Path) -> Result<(), String> {
-    if is_protected(path) {
+    let real = crate::paths::resolved(path);
+    if is_protected(path) || real.as_deref().map(is_protected).unwrap_or(false) {
         return Err(format!("{} is protected; Disko never removes it.", path.display()));
     }
     if fs::symlink_metadata(path).is_err() {
@@ -106,7 +107,7 @@ pub fn run_command(argv: &[String]) -> Result<(), String> {
 /// Delete root-owned paths with one administrator prompt (macOS authorization dialog).
 pub fn delete_as_admin(paths: &[PathBuf]) -> Result<(), String> {
     for p in paths {
-        if is_protected(p) {
+        if is_protected(p) || crate::paths::resolved(p).as_deref().map(is_protected).unwrap_or(false) {
             return Err(format!("{} is protected; Disko never removes it.", p.display()));
         }
     }
@@ -131,6 +132,17 @@ mod tests {
         assert!(delete(&crate::paths::home()).is_err());
         assert!(delete(&crate::paths::home().join("Documents")).is_err());
         assert!(trash(Path::new("/System/Library")).is_err());
+        let h = crate::paths::home();
+        assert!(crate::paths::is_protected(&h.join("Desktop/../.ssh")));
+        assert!(crate::paths::is_protected(&h.join(".SSH")));
+        assert!(crate::paths::is_protected(&h.join("library/Mobile Documents/com~apple~CloudDocs")));
+        assert!(crate::paths::is_protected(Path::new("/etc/hosts")));
+        assert!(crate::paths::is_protected(&h.join("dev/app/.git/objects")));
+        assert!(crate::paths::is_protected(&h.join(".aws/credentials")));
+        assert!(!crate::paths::is_protected(&h.join("dev/app/node_modules")));
+        assert!(!crate::paths::is_protected(&h.join("Library/Caches/com.foo")));
+        // /tmp resolves to /private/tmp: a file inside is fine, the folder itself is not.
+        assert!(trash(Path::new("/tmp")).is_err());
     }
 
     #[test]

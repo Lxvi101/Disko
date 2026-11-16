@@ -451,10 +451,14 @@ impl Hub {
                 result.skipped.push(CleanFailure { path: p.clone(), error: "On your keep list.".into() });
                 continue;
             }
+            if let Err(e) = disko_clutter::clean::check_path(Path::new(p)) {
+                result.failed.push(CleanFailure { path: p.clone(), error: e });
+                continue;
+            }
             let bytes = self.engine.size_of(p).map(|n| n.bytes).unwrap_or_else(|| ops::allocated(Path::new(p)));
             match ops::trash(Path::new(p)) {
                 Ok(to) => {
-                    result.freed += bytes;
+                    // Moving to the Trash frees nothing yet: bytes are in `trashed`, not `freed`.
                     result.trashed.push(Trashed { from: p.clone(), to: to.to_string_lossy().into(), bytes });
                 }
                 Err(e) => result.failed.push(CleanFailure { path: p.clone(), error: e }),
