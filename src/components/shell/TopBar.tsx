@@ -13,7 +13,7 @@ export const TopBar: React.FC = () => {
   const section = useStore((s) => s.section);
   return (
     <header className="drag-region relative z-10 flex items-center gap-6 h-[68px] shrink-0 pl-7 pr-5">
-      <motion.h1 key={section} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-[26px] font-bold tracking-tight w-[160px]">
+      <motion.h1 key={section} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="text-[24px] font-semibold tracking-[-0.03em] w-[160px]">
         {TITLES[section]}
       </motion.h1>
       <div className="flex-1 flex justify-center min-w-0">
@@ -38,32 +38,32 @@ export const DiskCapsule: React.FC = () => {
   return (
     <div className="flex items-center gap-4 min-w-0">
       <div className="flex items-baseline gap-1.5 shrink-0">
-        <span className="num text-[26px] font-semibold leading-none">{f.value}</span>
-        <span className="num text-[15px] font-semibold muted">{f.unit} free</span>
+        <span className="num text-[24px] font-medium leading-none">{f.value}</span>
+        <span className="num text-[14px] unit">{f.unit} free</span>
       </div>
       <Tip
         side="bottom"
         content={
           <div className="flex flex-col gap-1.5 min-w-[200px]">
-            <Legend color="var(--used-2)" label="In use" value={bytes(usedOther)} />
-            <Legend color="linear-gradient(90deg,#ff8a3d,#ff5fa2)" label="Clutter" value={bytes(c)} />
-            <Legend color="var(--panel-3)" label="Free" value={bytes(free)} />
+            <Legend color="var(--used)" label="In use" value={bytes(usedOther)} />
+            <Legend color="var(--accent)" label="Clutter" value={bytes(c)} />
+            <Legend color="var(--track)" label="Free" value={bytes(free)} />
             {hidden > 0 && <div className="dim text-[12px] pt-1">{bytes(hidden)} of “in use” is macOS, snapshots and other space no folder shows.</div>}
           </div>
         }
       >
-        <div className="relative h-[22px] w-[clamp(220px,28vw,420px)] rounded-full overflow-hidden flex" style={{ background: 'var(--panel-3)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,.25)' }}>
-          <motion.div className="h-full" style={{ background: 'linear-gradient(180deg, var(--used), var(--used-2))' }} animate={{ width: pct(usedOther) }} transition={{ type: 'spring', stiffness: 120, damping: 24 }} />
+        {/* Segmented solid tones with tiny gaps: in use · clutter · free. */}
+        <div className="relative h-[12px] w-[clamp(220px,28vw,420px)] flex gap-[3px] py-[0px]">
+          <motion.div className="h-full rounded-l-full shrink-0" style={{ background: 'var(--used)' }} animate={{ width: pct(usedOther) }} transition={{ type: 'spring', stiffness: 120, damping: 26 }} />
           <motion.button
             aria-label="Clutter"
             onClick={() => go('clutter')}
-            className="h-full relative"
-            style={{ background: 'linear-gradient(90deg, #ff8a3d, #ff5fa2 55%, #a98bff)', boxShadow: '0 0 18px rgba(255,95,162,.6)' }}
+            className="h-full shrink-0 rounded-[2px] transition-[filter] hover:brightness-110"
+            style={{ background: 'var(--accent)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.18)' }}
             animate={{ width: pct(c) }}
-            transition={{ type: 'spring', stiffness: 120, damping: 24 }}
-          >
-            <span className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,.35), transparent 60%)' }} />
-          </motion.button>
+            transition={{ type: 'spring', stiffness: 120, damping: 26 }}
+          />
+          <div className="h-full flex-1 rounded-r-full" style={{ background: 'var(--track)', boxShadow: 'inset 0 0 0 1px var(--line)' }} />
         </div>
       </Tip>
     </div>
@@ -72,7 +72,7 @@ export const DiskCapsule: React.FC = () => {
 
 const Legend: React.FC<{ color: string; label: string; value: string }> = ({ color, label, value }) => (
   <div className="flex items-center gap-2.5">
-    <span className="w-3 h-3 rounded-full" style={{ background: color }} />
+    <span className="w-2.5 h-2.5 rounded-[3px]" style={{ background: color, boxShadow: 'inset 0 0 0 1px var(--line)' }} />
     <span className="flex-1">{label}</span>
     <span className="num font-semibold">{value}</span>
   </div>
@@ -102,21 +102,15 @@ export const ScanRing: React.FC = () => {
     >
       <button className="no-drag relative w-10 h-10 flex items-center justify-center rounded-full row-hover" aria-label={done ? 'Scan again' : 'Scanning'} onClick={() => done && rescan()}>
         <svg width="34" height="34" viewBox="0 0 34 34" className="absolute">
-          <defs>
-            <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="#9a7bff" />
-              <stop offset="1" stopColor="#3fc6ff" />
-            </linearGradient>
-          </defs>
-          <circle cx="17" cy="17" r={R} fill="none" stroke="var(--panel-3)" strokeWidth="3" />
+          <circle cx="17" cy="17" r={R} fill="none" stroke="var(--track)" strokeWidth="2" />
           <motion.circle
-            cx="17" cy="17" r={R} fill="none" stroke="url(#ring)" strokeWidth="3" strokeLinecap="round"
+            cx="17" cy="17" r={R} fill="none" stroke="var(--accent-text)" strokeWidth="2" strokeLinecap="round"
             transform="rotate(-90 17 17)" strokeDasharray={C}
             animate={{ strokeDashoffset: C * (1 - (done ? 1 : Math.max(0.04, frac))) }}
             transition={{ type: 'spring', stiffness: 80, damping: 20 }}
           />
         </svg>
-        {done ? <Check size={15} strokeWidth={3} style={{ color: '#7cc8ff' }} /> : <RotateCw size={13} className="muted" style={{ animation: 'spin 1.4s linear infinite' }} />}
+        {done ? <Check size={14} strokeWidth={2.4} style={{ color: 'var(--accent-text)' }} /> : <RotateCw size={13} className="muted" style={{ animation: 'spin 1.4s linear infinite' }} />}
       </button>
     </Tip>
   );

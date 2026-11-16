@@ -21,10 +21,10 @@ export const FolderList: React.FC<{ tree: MapNode }> = ({ tree }) => {
       <div className="flex items-center gap-4 px-5 pt-5 pb-4">
         <NodeIcon node={{ ...tree, kind: tree.path === '/' ? 'disk' : 'dir' }} size={52} />
         <div className="min-w-0">
-          <div className="text-[20px] font-bold truncate">{tree.name}</div>
+          <div className="text-[18px] font-semibold truncate">{tree.name}</div>
           <div className="flex items-baseline gap-1.5">
-            <span className="num text-[22px] font-bold">{s.value}</span>
-            <span className="num text-[14px] font-semibold muted">{s.unit}</span>
+            <span className="num text-[22px] font-semibold">{s.value}</span>
+            <span className="num text-[14px] unit">{s.unit}</span>
             <span className="muted text-[14px] ml-1">· {count(tree.files)} files</span>
           </div>
         </div>
@@ -49,7 +49,7 @@ export const Row: React.FC<{ node: MapNode; max: number; index: number; indent?:
   const cat = catOf(node.clutter);
   const s = splitBytes(node.bytes);
   const selectable = node.kind === 'dir' || node.kind === 'file';
-  const color = cat?.color ?? (node.kind === 'hidden' ? '#8f82c4' : 'var(--accent)');
+  const color = cat?.color ?? (node.kind === 'hidden' ? '#7c7a92' : 'var(--muted)');
 
   // Hovering the map scrolls the matching row into view.
   useEffect(() => {
@@ -72,7 +72,7 @@ export const Row: React.FC<{ node: MapNode; max: number; index: number; indent?:
           onMouseEnter={() => setHover(node.path)}
           onMouseLeave={() => setHover(null)}
           className="flex items-center gap-3 rounded-2xl pr-3 py-2.5 transition-colors"
-          style={{ paddingLeft: 10 + indent * 26, background: hovered ? 'var(--panel-2)' : picked ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined, cursor: node.kind === 'dir' ? 'pointer' : 'default' }}
+          style={{ paddingLeft: 10 + indent * 26, background: hovered ? 'var(--panel-2)' : picked ? 'var(--accent-soft)' : undefined, cursor: node.kind === 'dir' ? 'pointer' : 'default' }}
         >
           {selectable ? <Checkbox checked={picked} onChange={() => toggle(sel.node(node))} /> : <span className="w-[22px] shrink-0" />}
           {expandable && (
@@ -81,16 +81,16 @@ export const Row: React.FC<{ node: MapNode; max: number; index: number; indent?:
           <NodeIcon node={node} size={34} />
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-2">
-              <span className="font-semibold text-[15px] truncate">{node.name}</span>
+              <span className="font-medium text-[15px] truncate">{node.name}</span>
             </div>
-            <div className="h-[5px] mt-1.5 bar-track">
-              <motion.div className="h-full rounded-full" style={{ background: cat ? `linear-gradient(90deg, ${cat.color}, ${cat.color2})` : color, opacity: cat ? 1 : 0.55 }} animate={{ width: `${Math.max(1.5, (node.bytes / max) * 100)}%` }} transition={{ type: 'spring', stiffness: 140, damping: 24 }} />
+            <div className="h-[4px] mt-1.5 bar-track">
+              <motion.div className="h-full rounded-full" style={{ background: color, opacity: cat ? 0.95 : 0.45 }} animate={{ width: `${Math.max(1.5, (node.bytes / max) * 100)}%` }} transition={{ type: 'spring', stiffness: 140, damping: 24 }} />
             </div>
           </div>
           {expandable && <span className="muted text-[13px] w-[90px] text-right shrink-0">{age(node.newest)}</span>}
           <div className="text-right shrink-0 w-[84px]">
-            <span className="num font-bold text-[16px]">{s.value}</span>
-            <span className="num font-semibold text-[13px] muted ml-1">{s.unit}</span>
+            <span className="num font-semibold text-[16px]">{s.value}</span>
+            <span className="num text-[13px] unit ml-1">{s.unit}</span>
           </div>
         </div>
       </Tip>

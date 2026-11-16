@@ -29,7 +29,7 @@ export const HoldButton: React.FC<{ onDone: () => void; children: React.ReactNod
       onKeyDown={(e) => { if ((e.key === ' ' || e.key === 'Enter') && start.current === null && !e.repeat) begin(); }}
       onKeyUp={stop}
     >
-      <motion.span className="absolute inset-0 origin-left" style={{ background: 'rgba(255,255,255,.28)', scaleX: p }} />
+      <motion.span className="absolute inset-0 origin-left" style={{ background: 'rgba(255,255,255,.22)', scaleX: p }} />
       <span className="relative inline-flex items-center gap-2">{p > 0 ? 'Keep holding…' : children}</span>
     </button>
   );

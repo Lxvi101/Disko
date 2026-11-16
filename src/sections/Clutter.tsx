@@ -5,7 +5,7 @@ import { useStore, sel } from '../store';
 import { api } from '../lib/api';
 import { CATEGORIES, type CategoryMeta } from '../lib/categories';
 import { age, splitBytes, bytes } from '../lib/format';
-import { Icon } from '../lib/icons';
+import { GlassIcon, Icon } from '../lib/icons';
 import { Checkbox } from '../components/ui/Checkbox';
 import { HoldButton } from '../components/ui/HoldButton';
 import { Tip } from '../components/ui/Tip';
@@ -36,29 +36,29 @@ export const Clutter: React.FC = () => {
       <div className="flex items-end gap-8 pt-2 pb-6 flex-wrap">
         <div>
           <div className="flex items-baseline gap-3">
-            <motion.span key={t.value} initial={{ opacity: 0.6 }} animate={{ opacity: 1 }} className="num font-bold leading-[0.9]" style={{ fontSize: 'clamp(64px, 8vw, 104px)', background: 'linear-gradient(120deg,#ffb36b,#ff5fa2 45%,#a98bff)', WebkitBackgroundClip: 'text', color: 'transparent' }}>
+            <motion.span key={t.value} initial={{ opacity: 0.7 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }} className="hero-num leading-[0.88]" style={{ fontSize: 'clamp(64px, 8vw, 108px)' }}>
               {t.value}
             </motion.span>
-            <span className="num font-bold text-[34px]" style={{ color: '#ff8fb8' }}>{t.unit}</span>
+            <span className="num unit text-[32px] tracking-[-0.03em]">{t.unit}</span>
           </div>
-          <div className="text-[22px] font-semibold mt-2 flex items-center gap-3">
+          <div className="text-[18px] font-medium muted mt-3 flex items-center gap-3">
             of clutter
-            {scanning && <span className="muted text-[15px] font-medium flex items-center gap-2"><span className="w-2 h-2 rounded-full" style={{ background: '#7cc8ff', animation: 'spin 1s linear infinite', boxShadow: '0 0 10px #7cc8ff' }} />still looking</span>}
+            {scanning && <span className="dim text-[14px] font-medium flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent-text)', animation: 'breathe 1.6s ease-in-out infinite' }} />still looking</span>}
           </div>
         </div>
         <div className="flex-1" />
         {safe.length > 0 && (
-          <button className="btn btn-primary !h-14 !px-7 !text-[17px]" onClick={() => remove(safe.map(sel.finding))}>
-            <Sparkles size={20} /> Clean all safe · <span className="num">{bytes(safeBytes)}</span>
+          <button className="btn btn-primary !h-12 !px-6 !text-[15px]" onClick={() => remove(safe.map(sel.finding))}>
+            <Sparkles size={18} strokeWidth={1.8} /> Clean all safe <span className="opacity-60">·</span> <span className="num">{bytes(safeBytes)}</span>
           </button>
         )}
       </div>
 
       {/* Proportions */}
       {total > 0 && (
-        <div className="flex h-3 rounded-full overflow-hidden gap-[3px] mb-7">
+        <div className="flex h-[6px] rounded-full overflow-hidden gap-[3px] mb-8">
           {groups.map((g) => (
-            <motion.div key={g.meta.id} layout className="h-full rounded-full" style={{ background: `linear-gradient(90deg, ${g.meta.color}, ${g.meta.color2})`, flexGrow: g.bytes, flexBasis: 0, minWidth: 6 }} />
+            <motion.div key={g.meta.id} layout title={g.meta.label} className="h-full rounded-[2px]" style={{ background: g.meta.color, flexGrow: g.bytes, flexBasis: 0, minWidth: 4 }} />
           ))}
         </div>
       )}
@@ -78,8 +78,8 @@ export const Clutter: React.FC = () => {
 
 const FactoryFresh = () => (
   <div className="flex flex-col items-center justify-center py-24 text-center">
-    <Sparkles size={56} style={{ color: '#a98bff' }} />
-    <div className="text-[32px] font-bold mt-4">Factory fresh</div>
+    <Sparkles size={48} strokeWidth={1.4} style={{ color: 'var(--accent-text)' }} />
+    <div className="text-[30px] font-semibold tracking-[-0.03em] mt-4">Factory fresh</div>
     <div className="muted text-[16px] mt-1">Nothing left to clean.</div>
   </div>
 );
@@ -100,22 +100,19 @@ const CategoryCard: React.FC<{ meta: CategoryMeta; items: Finding[]; total: numb
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      className="glass rounded-[28px] overflow-hidden relative"
-      style={{ gridColumn: open ? '1 / -1' : undefined, boxShadow: open ? `0 0 0 1.5px ${meta.color}66, 0 30px 60px -30px ${meta.color}88` : undefined }}
+      className="glass rounded-[26px] overflow-hidden relative"
+      style={{ gridColumn: open ? '1 / -1' : undefined, borderColor: open ? 'var(--line-2)' : undefined }}
     >
-      <div className="absolute -top-16 -right-10 w-48 h-48 rounded-full pointer-events-none" style={{ background: `radial-gradient(circle, ${meta.color}40, transparent 70%)` }} />
       <motion.div layout="position" className="relative flex items-start gap-4 p-5 cursor-pointer" onClick={onToggle}>
-        <span className="w-14 h-14 rounded-[18px] flex items-center justify-center shrink-0" style={{ background: `linear-gradient(145deg, ${meta.color}, ${meta.color2})`, boxShadow: `0 10px 24px -10px ${meta.color}, inset 0 1px 0 rgba(255,255,255,.35)` }}>
-          <I size={28} color="white" strokeWidth={2} />
-        </span>
+        <GlassIcon icon={I} color={meta.color} size={52} />
         <div className="flex-1 min-w-0">
-          <div className="text-[17px] font-semibold flex items-center gap-2">
+          <div className="text-[15px] font-medium muted flex items-center gap-2">
             <span className="truncate">{meta.label}</span>
-            {regrows && <Tip content="Comes back by itself"><Repeat size={15} className="muted" /></Tip>}
+            {regrows && <Tip content="Comes back by itself"><Repeat size={13} className="dim" /></Tip>}
           </div>
-          <div className="flex items-baseline gap-1.5 mt-0.5">
-            <span className="num text-[30px] font-bold leading-none">{s.value}</span>
-            <span className="num text-[16px] font-semibold muted">{s.unit}</span>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className="num text-[30px] font-semibold leading-none tracking-[-0.035em]">{s.value}</span>
+            <span className="num text-[15px] unit">{s.unit}</span>
           </div>
           {open && <div className="muted text-[14px] mt-2">{meta.blurb}</div>}
         </div>
@@ -141,7 +138,7 @@ const CategoryCard: React.FC<{ meta: CategoryMeta; items: Finding[]; total: numb
         {open && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="relative">
             <div className="flex items-center gap-3 px-5 pb-3">
-              <Checkbox checked={picked === all.length && all.length > 0} mixed={picked > 0 && picked < all.length} onChange={(v) => setMany(all, v)} color={meta.color} />
+              <Checkbox checked={picked === all.length && all.length > 0} mixed={picked > 0 && picked < all.length} onChange={(v) => setMany(all, v)} />
               <span className="muted text-[14px]">{picked ? `${picked} selected` : 'Select all'}</span>
               <div className="flex-1" />
               {meta.id === 'trash' ? (
@@ -156,7 +153,7 @@ const CategoryCard: React.FC<{ meta: CategoryMeta; items: Finding[]; total: numb
             </div>
             <div className="px-2 pb-3">
               <AnimatePresence initial={false}>
-                {items.map((f) => <FindingRow key={f.id} f={f} color={meta.color} />)}
+                {items.map((f) => <FindingRow key={f.id} f={f} />)}
               </AnimatePresence>
             </div>
           </motion.div>
@@ -166,7 +163,7 @@ const CategoryCard: React.FC<{ meta: CategoryMeta; items: Finding[]; total: numb
   );
 };
 
-const FindingRow: React.FC<{ f: Finding; color: string }> = ({ f, color }) => {
+const FindingRow: React.FC<{ f: Finding }> = ({ f }) => {
   const picked = useStore((s) => s.selection.has(`f:${f.id}`));
   const toggle = useStore((s) => s.toggle);
   const remove = useStore((s) => s.remove);
@@ -175,14 +172,14 @@ const FindingRow: React.FC<{ f: Finding; color: string }> = ({ f, color }) => {
   const row = (
     <div
       className="group flex items-center gap-4 px-3 py-3 rounded-2xl row-hover"
-      style={{ opacity: f.busy ? 0.45 : 1, background: picked ? `${color}14` : undefined }}
+      style={{ opacity: f.busy ? 0.45 : 1, background: picked ? 'var(--accent-soft)' : undefined }}
       onClick={() => !f.busy && toggle(item)}
     >
-      <Checkbox checked={picked} disabled={!!f.busy} onChange={() => toggle(item)} color={color} />
+      <Checkbox checked={picked} disabled={!!f.busy} onChange={() => toggle(item)} />
       <Icon iconKey={f.icon} size={40} />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 min-w-0">
-          <span className="text-[16px] font-semibold truncate">{f.title}</span>
+          <span className="text-[15px] font-medium truncate">{f.title}</span>
           {f.detail && <span className="muted text-[14px] truncate">{f.detail}</span>}
         </div>
         <div className="muted text-[13px] truncate mt-0.5">{f.busy ?? f.why}</div>
@@ -195,8 +192,8 @@ const FindingRow: React.FC<{ f: Finding; color: string }> = ({ f, color }) => {
       </div>
       <span className="muted text-[13px] w-[86px] text-right shrink-0">{age(f.last_used)}</span>
       <div className="w-[92px] text-right shrink-0">
-        <span className="num font-bold text-[18px]">{s.value}</span>
-        <span className="num font-semibold text-[13px] muted ml-1">{s.unit}</span>
+        <span className="num font-semibold text-[17px]">{s.value}</span>
+        <span className="num text-[13px] unit ml-1">{s.unit}</span>
       </div>
       {f.category !== 'trash' ? (
         <button className={`btn btn-icon !w-9 !h-9 ${f.busy ? 'invisible' : 'opacity-0 group-hover:opacity-100'}`} aria-label="Remove" disabled={!!f.busy} onClick={(e) => { e.stopPropagation(); remove([item]); }}>
@@ -235,14 +232,14 @@ const RoutineToggle: React.FC<{ meta: CategoryMeta }> = ({ meta }) => {
           aria-label="Routine"
           onClick={toggle}
           className="w-8 h-8 rounded-full flex items-center justify-center transition-all"
-          style={{ background: on ? meta.color : 'var(--panel-2)', color: on ? 'white' : 'var(--muted)', boxShadow: on ? `0 6px 16px -6px ${meta.color}` : undefined }}
+          style={{ background: on ? 'var(--accent)' : 'transparent', color: on ? 'white' : 'var(--dim)', boxShadow: on ? 'inset 0 1px 0 rgba(255,255,255,.18)' : 'inset 0 0 0 1px var(--line)' }}
         >
-          <Clock size={16} strokeWidth={2.2} />
+          <Clock size={15} strokeWidth={1.9} />
         </button>
       </Tip>
       {on && (
         <Tip content="Change how often">
-          <button onClick={cycle} className="num text-[12px] font-bold px-1.5 h-5 rounded-full row-hover whitespace-nowrap" style={{ color: meta.color }}>
+          <button onClick={cycle} className="num text-[12px] font-semibold px-1.5 h-5 rounded-full row-hover whitespace-nowrap" style={{ color: 'var(--accent-text)' }}>
             {routine!.every_days === 1 ? 'daily' : `${routine!.every_days}d`}
           </button>
         </Tip>

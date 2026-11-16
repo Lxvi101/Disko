@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AlertCircle, Info, Sparkles, Trash2, Undo2 } from 'lucide-react';
 import { useStore } from '../../store';
 
-const ICON = { freed: [Sparkles, '#3ddc97'], trash: [Trash2, '#aab2c5'], info: [Info, '#7cc8ff'], error: [AlertCircle, '#ff5c72'] } as const;
+const ICON = { freed: [Sparkles, 'var(--ok)'], trash: [Trash2, 'var(--muted)'], info: [Info, 'var(--accent-text)'], error: [AlertCircle, 'var(--danger)'] } as const;
 
 export const Toasts: React.FC = () => {
   const toasts = useStore((s) => s.toasts);

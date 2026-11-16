@@ -16,7 +16,7 @@ export const Checkbox: React.FC<{ checked: boolean; mixed?: boolean; onChange: (
       width: size, height: size, borderRadius: 999,
       background: checked || mixed ? color : 'transparent',
       border: checked || mixed ? `1.5px solid ${color}` : '1.5px solid var(--line-2)',
-      boxShadow: checked || mixed ? `0 4px 14px -4px ${color}` : undefined,
+      boxShadow: checked || mixed ? 'inset 0 1px 0 rgba(255,255,255,.2)' : undefined,
       opacity: disabled ? 0.35 : 1,
       color: 'white',
     }}

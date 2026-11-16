@@ -36,8 +36,8 @@ export const SelectionBar: React.FC = () => {
             ))}
           </div>
           <div className="flex items-baseline gap-2 pr-1">
-            <span className="num text-[24px] font-bold leading-none">{t.value}</span>
-            <span className="num text-[15px] font-semibold muted">{t.unit}</span>
+            <span className="num text-[24px] font-semibold leading-none">{t.value}</span>
+            <span className="num text-[15px] unit">{t.unit}</span>
             <span className="muted text-[15px] ml-1">· {items.length} {items.length === 1 ? 'item' : 'items'}</span>
           </div>
           <button className="btn btn-ghost btn-icon" aria-label="Clear selection" onClick={clear}><X size={18} /></button>

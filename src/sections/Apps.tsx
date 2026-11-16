@@ -29,18 +29,18 @@ export const Apps: React.FC = () => {
       <div className="flex items-end gap-6 pb-6 pt-1">
         <div>
           <div className="flex items-baseline gap-2">
-            <span className="num text-[56px] font-bold leading-none">{t.value}</span>
-            <span className="num text-[24px] font-bold muted">{t.unit}</span>
+            <span className="hero-num text-[64px] leading-[0.9]">{t.value}</span>
+            <span className="num unit text-[24px]">{t.unit}</span>
           </div>
-          <div className="text-[18px] font-semibold mt-1.5">
-            in {sorted.length} apps{idle > 0 && <span className="muted font-medium"> · {idle} unused for 3 months</span>}
+          <div className="text-[16px] font-medium muted mt-2.5">
+            in {sorted.length} apps{idle > 0 && <span className="dim"> · {idle} unused for 3 months</span>}
           </div>
         </div>
         <div className="flex-1" />
-        <div className="no-drag glass rounded-full p-1 flex gap-1">
+        <div className="no-drag seg rounded-full p-1 flex gap-0.5">
           {(['size', 'used'] as Sort[]).map((s) => (
-            <button key={s} onClick={() => setSort(s)} className="relative h-9 px-4 rounded-full text-[14px] font-semibold" style={{ color: sort === s ? 'white' : 'var(--muted)' }}>
-              {sort === s && <motion.span layoutId="apps-sort" className="absolute inset-0 rounded-full" style={{ background: 'linear-gradient(135deg, #9a7bff, #5b6cff)' }} />}
+            <button key={s} onClick={() => setSort(s)} className="relative h-8 px-4 rounded-full text-[13.5px] font-medium transition-colors" style={{ color: sort === s ? 'var(--text)' : 'var(--muted)' }}>
+              {sort === s && <motion.span layoutId="apps-sort" className="absolute inset-0 rounded-full seg-on" transition={{ type: 'spring', stiffness: 420, damping: 40 }} />}
               <span className="relative">{s === 'size' ? 'Biggest' : 'Least used'}</span>
             </button>
           ))}
@@ -72,32 +72,32 @@ const AppRow: React.FC<{ app: AppInfo; max: number; index: number }> = ({ app, m
       exit={{ opacity: 0, scale: 0.9, x: -40, transition: { duration: 0.25 } }}
       transition={{ type: 'spring', stiffness: 320, damping: 32, delay: Math.min(0.3, index * 0.02) }}
       className="group flex items-center gap-5 px-4 py-3 rounded-[24px] row-hover"
-      style={{ background: picked ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : undefined }}
+      style={{ background: picked ? 'var(--accent-soft)' : undefined }}
       onClick={() => !app.running && toggle(item)}
     >
       <Checkbox checked={picked} disabled={app.running} onChange={() => toggle(item)} title={app.running ? `${app.name} is open` : undefined} />
       <div className="relative">
         <Icon iconKey={app.icon} size={56} />
-        {app.running && <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full" style={{ background: 'var(--ok)', boxShadow: '0 0 0 3px var(--bg), 0 0 10px var(--ok)' }} />}
+        {app.running && <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full" style={{ background: 'var(--ok)', boxShadow: '0 0 0 3px var(--bg)' }} />}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-[18px] font-semibold truncate">{app.name}</span>
+          <span className="text-[16px] font-medium truncate">{app.name}</span>
           {app.apple && <Apple size={15} className="muted shrink-0" />}
         </div>
         <Tip content={<span><b>{bytes(app.app_bytes)}</b> app · <b>{bytes(app.data_bytes)}</b> its data</span>} className="block">
-          <div className="flex h-2 mt-2 max-w-[440px] bar-track">
-            <motion.div className="h-full" style={{ background: 'linear-gradient(90deg,#9a7bff,#5b6cff)' }} animate={{ width: `${(app.app_bytes / max) * 100}%` }} />
-            <motion.div className="h-full" style={{ background: 'linear-gradient(90deg,#4cc9ff,#2fd3e6)' }} animate={{ width: `${(app.data_bytes / max) * 100}%` }} />
+          <div className="flex h-[5px] mt-2 max-w-[440px] gap-[2px]">
+            <motion.div className="h-full rounded-l-full" style={{ background: 'var(--accent)' }} animate={{ width: `${(app.app_bytes / max) * 100}%` }} />
+            <motion.div className="h-full rounded-r-full" style={{ background: 'color-mix(in srgb, var(--accent-text) 45%, transparent)' }} animate={{ width: `${(app.data_bytes / max) * 100}%` }} />
           </div>
         </Tip>
       </div>
       <div className="w-[130px] text-right shrink-0">
-        <div className="text-[14px] font-medium" style={{ color: stale ? '#ffb36b' : 'var(--muted)' }}>{app.running ? 'Open now' : app.last_used ? age(app.last_used) : 'Never opened'}</div>
+        <div className="text-[14px] font-medium" style={{ color: stale ? 'var(--warn)' : 'var(--muted)' }}>{app.running ? 'Open now' : app.last_used ? age(app.last_used) : 'Never opened'}</div>
       </div>
       <div className="w-[100px] text-right shrink-0">
-        <span className="num font-bold text-[20px]">{s.value}</span>
-        <span className="num font-semibold text-[14px] muted ml-1">{s.unit}</span>
+        <span className="num font-semibold text-[19px]">{s.value}</span>
+        <span className="num text-[14px] unit ml-1">{s.unit}</span>
       </div>
       <Tip content={app.running ? `Quit ${app.name} first` : `Move ${app.name} and its data to the Trash`}>
         <button className={`btn !h-10 ${app.running ? 'invisible group-hover:visible' : 'opacity-0 group-hover:opacity-100'}`} disabled={app.running} onClick={(e) => { e.stopPropagation(); remove([item]); }}>

@@ -7,14 +7,15 @@ export default {
     extend: {
       colors: {
         ink: {
-          950: '#0b0d14',
-          900: '#0f121b',
-          800: '#151927',
-          700: '#1c2133',
+          950: '#07080c',
+          900: '#0d0f15',
+          800: '#14161d',
+          700: '#1b1e27',
         },
         accent: {
-          DEFAULT: '#8b7cf6',
-          2: '#38bdf8',
+          DEFAULT: 'var(--accent)',
+          hi: 'var(--accent-hi)',
+          text: 'var(--accent-text)',
         },
       },
       borderRadius: {

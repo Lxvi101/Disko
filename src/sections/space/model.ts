@@ -7,17 +7,18 @@ import type { TreeNode, VolumeInfo } from '../../lib/types';
 /** A tree node plus what the map needs to draw it. */
 export type MapNode = TreeNode & { hue?: number; why?: string };
 
-const BRANCH_HUES = [226, 262, 192, 292, 210, 246, 172, 316];
+// Ordinary folders stay in one quiet slate family around a cool axis; only clutter carries colour.
+const BRANCH_HUES = [222, 210, 234, 200, 244, 216, 228, 194];
 
-/** Calm hues for ordinary folders, vivid category colours for clutter. */
+/** Calm slate for ordinary folders, the category tone for clutter. */
 export function colorOf(n: TreeNode, hue: number, depth: number, dark: boolean): string {
   const cat = catOf(n.clutter);
   if (cat) return cat.color;
-  if (n.kind === 'hidden') return dark ? '#6f6596' : '#a9a1c9';
-  if (n.kind === 'other') return dark ? '#3a3f55' : '#c3c7d8';
+  if (n.kind === 'hidden') return dark ? '#3d3c4a' : '#d4d2de';
+  if (n.kind === 'other') return dark ? '#24272f' : '#dfe1e7';
   const file = n.kind === 'file';
-  const s = file ? 18 : 42;
-  const l = dark ? 46 + depth * 5 + (file ? -6 : 0) : 66 + depth * 3 + (file ? 6 : 0);
+  const s = file ? 14 : dark ? 30 : 34;
+  const l = dark ? 28 + depth * 4.5 + (file ? -3 : 0) : 84 - depth * 3.5 + (file ? 4 : 0);
   return `hsl(${hue} ${s}% ${l}%)`;
 }
 

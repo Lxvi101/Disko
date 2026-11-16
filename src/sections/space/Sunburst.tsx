@@ -5,7 +5,7 @@ import { ArrowUp } from 'lucide-react';
 import { useStore, sel } from '../../store';
 import { splitBytes, parentOf } from '../../lib/format';
 import { NodeIcon } from '../../lib/icons';
-import { CAT, catOf } from '../../lib/categories';
+import { CAT } from '../../lib/categories';
 import { colorOf, hueFor, type MapNode } from './model';
 
 type Arc = HierarchyRectangularNode<MapNode> & { color: string };
@@ -67,14 +67,13 @@ export const Sunburst: React.FC<{ tree: MapNode }> = ({ tree }) => {
 
   return (
     <div ref={wrap} className="relative w-full h-full flex items-center justify-center">
-      <div className="absolute rounded-full pointer-events-none" style={{ width: size * 0.9, height: size * 0.9, background: 'radial-gradient(circle, rgba(141,123,255,.16), transparent 65%)', filter: 'blur(20px)' }} />
       <AnimatePresence initial={false} mode="popLayout">
         <motion.div
           key={tree.path}
           initial={reduced() ? false : { opacity: 0, scale: dir > 0 ? 0.55 : 1.4 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: dir > 0 ? 1.5 : 0.6 }}
-          transition={{ duration: 0.42, ease: [0.2, 0.8, 0.2, 1] }}
+          transition={{ duration: 0.5, ease: [0.22, 0.8, 0.24, 1] }}
           style={{ width: size, height: size }}
           className="relative"
         >
@@ -192,8 +191,8 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
       ctx.fill();
       if (cr > 0) ctx.stroke();
       if (picked) {
-        ctx.fillStyle = 'rgba(255,255,255,.42)';
-        ctx.strokeStyle = 'rgba(255,255,255,.42)';
+        ctx.fillStyle = 'rgba(255,255,255,.34)';
+        ctx.strokeStyle = 'rgba(255,255,255,.34)';
         ctx.fill();
         if (cr > 0) ctx.stroke();
       }
@@ -210,7 +209,7 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
       const dim = h && !lineage.has(a);
       paint(a.depth, x0, x1, a.color, a === h ? 6 : 0, 1, selected(a.data.path));
       // Dim by veiling with the background, so rounded edges don't double up.
-      if (dim) paint(a.depth, x0, x1, dark ? 'rgba(6,7,14,.74)' : 'rgba(238,240,247,.74)', 0, 1, false);
+      if (dim) paint(a.depth, x0, x1, dark ? 'rgba(7,8,12,.72)' : 'rgba(244,245,248,.72)', 0, 1, false);
     }
     if (tw && p < 1) {
       for (const [path, f] of tw.from) {
@@ -226,24 +225,21 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
       const a0 = sgm.x0 - Math.PI / 2 + 0.004, a1 = sgm.x1 - Math.PI / 2 - 0.004;
       if (a1 <= a0) continue;
       ctx.beginPath();
-      ctx.arc(0, 0, R + 11, a0, a1);
+      ctx.arc(0, 0, R + 10, a0, a1);
       ctx.strokeStyle = sgm.color;
-      ctx.lineWidth = 7;
+      ctx.lineWidth = 4;
       ctx.lineCap = 'round';
-      ctx.globalAlpha = h && !(hover && (sgm.path === hover || sgm.path.startsWith(hover + '/'))) ? 0.3 : 1;
-      ctx.shadowColor = sgm.color;
-      ctx.shadowBlur = 12;
+      ctx.globalAlpha = h && !(hover && (sgm.path === hover || sgm.path.startsWith(hover + '/'))) ? 0.25 : 0.9;
       ctx.stroke();
-      ctx.shadowBlur = 0;
     }
     ctx.lineCap = 'butt';
-    // Glossy sheen over the wheel.
+    // Soft light falling from above, matching the window's bloom.
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-atop';
-    const g = ctx.createRadialGradient(-R * 0.35, -R * 0.45, R * 0.05, 0, 0, R * 1.1);
-    g.addColorStop(0, dark ? 'rgba(255,255,255,.22)' : 'rgba(255,255,255,.35)');
-    g.addColorStop(0.55, 'rgba(255,255,255,0)');
-    g.addColorStop(1, dark ? 'rgba(0,0,0,.18)' : 'rgba(0,0,0,.05)');
+    const g = ctx.createLinearGradient(0, -R, 0, R);
+    g.addColorStop(0, dark ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.16)');
+    g.addColorStop(0.6, 'rgba(255,255,255,0)');
+    g.addColorStop(1, dark ? 'rgba(0,0,0,.12)' : 'rgba(0,0,0,.03)');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(0, 0, R + 1, 0, Math.PI * 2);
@@ -289,7 +285,6 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
   const h = hover ? lay.byPath.get(hover) : undefined;
   const shownNode: MapNode = h?.data ?? lay.root;
   const s = splitBytes(h ? h.value ?? h.data.bytes : lay.root.bytes);
-  const cat = catOf(shownNode.clutter);
 
   return (
     <div className="relative w-full h-full">
@@ -320,10 +315,10 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
           ) : (
             <>
               <NodeIcon node={shownNode === lay.root && lay.root.path === '/' ? { ...shownNode, kind: 'disk' } : shownNode} size={Math.min(44, inner * 0.32)} />
-              <div className="mt-2 font-semibold truncate max-w-full" style={{ fontSize: Math.max(13, Math.min(17, inner * 0.12)), color: cat?.color }}>{shownNode.name}</div>
-              <div className="flex items-baseline gap-1 mt-0.5">
-                <span className="num font-bold leading-none" style={{ fontSize: Math.max(24, Math.min(46, inner * 0.3)) }}>{s.value}</span>
-                <span className="num font-semibold muted" style={{ fontSize: Math.max(13, inner * 0.11) }}>{s.unit}</span>
+              <div className="mt-2 font-medium truncate max-w-full muted" style={{ fontSize: Math.max(13, Math.min(16, inner * 0.11)) }}>{shownNode.name}</div>
+              <div className="flex items-baseline gap-1 mt-1">
+                <span className="num font-semibold leading-none tracking-[-0.04em]" style={{ fontSize: Math.max(24, Math.min(46, inner * 0.3)) }}>{s.value}</span>
+                <span className="num unit" style={{ fontSize: Math.max(13, inner * 0.11) }}>{s.unit}</span>
               </div>
               {shownNode.why && <div className="muted text-[12.5px] mt-1.5 leading-snug">{shownNode.why}</div>}
             </>

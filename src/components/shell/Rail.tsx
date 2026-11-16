@@ -40,12 +40,12 @@ const RailButton: React.FC<{ id: Section; icon: LucideIcon; label: string; activ
         <motion.span
           layoutId="rail-active"
           className="absolute inset-0 rounded-2xl"
-          style={{ background: 'linear-gradient(160deg, rgba(141,123,255,.32), rgba(76,201,255,.14))', boxShadow: 'inset 0 0 0 1px rgba(141,123,255,.35), 0 8px 24px -10px rgba(141,123,255,.7)' }}
-          transition={{ type: 'spring', stiffness: 500, damping: 38 }}
+          style={{ background: 'var(--panel-3)', boxShadow: 'inset 0 0 0 1px var(--line), inset 0 1px 0 var(--hi)' }}
+          transition={{ type: 'spring', stiffness: 420, damping: 40 }}
         />
       )}
-      <I size={24} strokeWidth={1.8} className="relative" />
-      {badge && <span className="relative num text-[11px] font-semibold mt-1" style={{ color: active ? 'var(--text)' : '#ff9f6b' }}>{badge}</span>}
+      <I size={22} strokeWidth={1.6} className="relative" />
+      {badge && <span className="relative num text-[11px] font-medium mt-1" style={{ color: active ? 'var(--text)' : 'var(--accent-text)' }}>{badge}</span>}
     </button>
   </Tip>
 );

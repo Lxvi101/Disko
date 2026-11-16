@@ -5,11 +5,11 @@ import { Check } from 'lucide-react';
 import { useStore, sel } from '../../store';
 import { splitBytes } from '../../lib/format';
 import { NodeIcon } from '../../lib/icons';
-import { catOf } from '../../lib/categories';
+import { catOf, tint } from '../../lib/categories';
 import { Tip } from '../../components/ui/Tip';
 import { hueFor, type MapNode } from './model';
 
-/** Space Lens style: the current folder's items as glossy bubbles sized by space. */
+/** The current folder's items as frosted glass bubbles sized by space. */
 export const Bubbles: React.FC<{ tree: MapNode }> = ({ tree }) => {
   const wrap = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 800, h: 600 });
@@ -53,8 +53,9 @@ const Bubble: React.FC<{ node: MapNode; x: number; y: number; r: number; index: 
   const picked = useStore((s) => s.selection.has(`p:${node.path}`));
   const dark = useStore((s) => s.dark);
   const cat = catOf(node.clutter);
-  const base = cat?.color ?? (node.kind === 'hidden' ? '#7d6fb3' : node.kind === 'other' ? '#6b7290' : hsl(hue, 72, dark ? 66 : 64));
-  const base2 = cat?.color2 ?? (node.kind === 'hidden' ? '#4b3f7a' : node.kind === 'other' ? '#444a63' : hsl(hue + 16, 70, dark ? 46 : 52));
+  // One tone per bubble; clutter carries its category tone, folders a quiet slate.
+  const base = cat?.color ?? (node.kind === 'hidden' ? '#7c7a92' : node.kind === 'other' ? '#6b7080' : hsl(hue, 40, dark ? 64 : 58));
+  const a = cat ? (dark ? 32 : 36) : dark ? 17 : 20;
   const s = splitBytes(node.bytes);
   const selectable = node.kind === 'dir' || node.kind === 'file';
   const icon = Math.min(64, Math.max(16, r * 0.42));
@@ -64,7 +65,7 @@ const Bubble: React.FC<{ node: MapNode; x: number; y: number; r: number; index: 
       initial={{ opacity: 0, scale: 0.4, left: x - r, top: y - r, width: r * 2, height: r * 2 }}
       animate={{ opacity: 1, scale: 1, left: x - r, top: y - r, width: r * 2, height: r * 2 }}
       exit={{ opacity: 0, scale: 0.2, transition: { duration: 0.25 } }}
-      transition={{ type: 'spring', stiffness: 170, damping: 24, delay: Math.min(0.25, index * 0.012) }}
+      transition={{ type: 'spring', stiffness: 140, damping: 26, delay: Math.min(0.25, index * 0.012) }}
       className="absolute group"
       onMouseEnter={() => setHover(node.path)}
       onMouseLeave={() => setHover(null)}
@@ -73,10 +74,10 @@ const Bubble: React.FC<{ node: MapNode; x: number; y: number; r: number; index: 
         <button
           className="relative w-full h-full rounded-full flex flex-col items-center justify-center text-center overflow-hidden"
           style={{
-            background: `radial-gradient(circle at 50% 115%, ${base}cc 0%, ${base2}66 45%, ${base2}1f 75%), radial-gradient(circle at 50% 50%, ${base}14, ${base}30)`,
-            boxShadow: `inset 0 0 0 1.5px ${base}${hovered || picked ? 'ee' : '66'}, inset 0 ${r * 0.08}px ${r * 0.3}px rgba(255,255,255,.12), 0 ${r * 0.1}px ${r * 0.5}px -${r * 0.2}px ${base}aa${picked ? `, 0 0 0 4px var(--accent)` : ''}`,
-            transform: hovered ? 'scale(1.03)' : undefined,
-            transition: 'transform 160ms ease, box-shadow 160ms ease',
+            background: `radial-gradient(120% 95% at 50% 0%, ${tint(base, a + 10)}, ${tint(base, a)} 55%, ${tint(base, Math.max(6, a - 6))})`,
+            boxShadow: `inset 0 0 0 1px ${tint(base, hovered || picked ? 75 : 34)}, inset 0 1px 0 var(--hi), inset 0 -${r * 0.25}px ${r * 0.45}px -${r * 0.3}px ${tint(base, a + 16)}, 0 ${r * 0.14}px ${r * 0.5}px -${r * 0.3}px ${tint(base, 55)}${picked ? `, 0 0 0 3px var(--accent)` : ''}`,
+            transform: hovered ? 'scale(1.02)' : undefined,
+            transition: 'transform 220ms ease, box-shadow 220ms ease',
             cursor: node.kind === 'dir' ? 'pointer' : 'default',
           }}
           onClick={(e) => {
@@ -85,18 +86,16 @@ const Bubble: React.FC<{ node: MapNode; x: number; y: number; r: number; index: 
             else toggle(sel.node(node));
           }}
         >
-          {/* glass highlight */}
-          <span className="absolute rounded-full pointer-events-none" style={{ left: '20%', right: '20%', top: '3%', height: '20%', background: 'radial-gradient(ellipse at 50% 0%, rgba(255,255,255,.38), rgba(255,255,255,0) 70%)' }} />
-          <span className="relative" style={{ filter: 'drop-shadow(0 4px 10px rgba(0,0,0,.3))' }}>
+          <span className="relative">
             {r > 16 && <NodeIcon node={node} size={icon} />}
           </span>
           {r > 46 && (
-            <span className="relative font-semibold truncate px-3 mt-1.5" style={{ maxWidth: r * 1.6, fontSize: Math.min(16, Math.max(12, r * 0.15)), color: dark ? 'white' : '#1b1640' }}>
+            <span className="relative font-medium truncate px-3 mt-1.5" style={{ maxWidth: r * 1.6, fontSize: Math.min(16, Math.max(12, r * 0.15)), color: 'var(--text)' }}>
               {node.name}
             </span>
           )}
           {r > 32 && (
-            <span className="relative num font-bold" style={{ fontSize: Math.min(22, Math.max(12, r * 0.17)), color: dark ? 'rgba(255,255,255,.85)' : 'rgba(27,22,64,.75)' }}>
+            <span className="relative num font-semibold" style={{ fontSize: Math.min(22, Math.max(12, r * 0.17)), color: 'var(--text)', opacity: 0.86 }}>
               {s.value} {s.unit}
             </span>
           )}

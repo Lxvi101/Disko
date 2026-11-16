@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronRight, History } from 'lucide-react';
 import { useStore, sel, type SelItem } from '../store';
 import { age, date, daysSince, splitBytes } from '../lib/format';
-import { Glyph, glyphOf } from '../lib/icons';
+import { Glyph, GlassIcon, glyphOf } from '../lib/icons';
 import { Checkbox } from '../components/ui/Checkbox';
 import type { AgentProject, AgentSession, AgentTool } from '../lib/types';
 
@@ -25,10 +25,10 @@ export const Agents: React.FC = () => {
     <div className="scroll h-full px-7 pb-32">
       <div className="pt-1 pb-6">
         <div className="flex items-baseline gap-2">
-          <span className="num text-[56px] font-bold leading-none">{t.value}</span>
-          <span className="num text-[24px] font-bold muted">{t.unit}</span>
+          <span className="hero-num text-[64px] leading-[0.9]">{t.value}</span>
+          <span className="num unit text-[24px]">{t.unit}</span>
         </div>
-        <div className="text-[18px] font-semibold mt-1.5">kept by your coding agents</div>
+        <div className="text-[16px] font-medium muted mt-2.5">kept by your coding agents</div>
       </div>
 
       <div className="flex gap-3 flex-wrap mb-6">
@@ -41,14 +41,14 @@ export const Agents: React.FC = () => {
               key={tl.tool}
               onClick={() => setActive(tl.tool)}
               className="relative flex items-center gap-3.5 pl-3 pr-6 py-3 rounded-[22px] text-left transition-all"
-              style={{ background: on ? `linear-gradient(140deg, ${color}38, ${color}10)` : 'var(--panel)', border: `1px solid ${on ? color + '80' : 'var(--line)'}`, boxShadow: on ? `0 16px 36px -20px ${color}` : undefined }}
+              style={{ background: on ? 'var(--panel-2)' : 'var(--panel)', border: `1px solid ${on ? 'var(--line-2)' : 'var(--line)'}`, boxShadow: on ? 'var(--card-shadow), inset 0 0 0 1px var(--line)' : undefined, opacity: on ? 1 : 0.8 }}
             >
-              <Glyph name={tl.icon} size={48} />
+              <GlassIcon icon={glyphOf(tl.icon)[0]} color={color} size={46} />
               <div>
-                <div className="text-[16px] font-semibold">{tl.name}</div>
+                <div className="text-[14px] font-medium muted">{tl.name}</div>
                 <div className="flex items-baseline gap-1">
-                  <span className="num text-[22px] font-bold leading-tight">{s.value}</span>
-                  <span className="num text-[13px] font-semibold muted">{s.unit}</span>
+                  <span className="num text-[22px] font-semibold leading-tight">{s.value}</span>
+                  <span className="num text-[13px] unit">{s.unit}</span>
                 </div>
               </div>
             </button>
@@ -93,29 +93,29 @@ const ProjectRow: React.FC<{ tool: AgentTool; p: AgentProject; max: number; inde
   return (
     <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -40, height: 0 }} transition={{ delay: Math.min(0.25, index * 0.02) }} className="rounded-[24px]" style={{ background: open ? 'var(--panel)' : undefined }}>
       <div className="flex items-center gap-4 px-4 py-3 rounded-[24px] row-hover cursor-pointer" onClick={() => setOpen(!open)}>
-        <Checkbox checked={n === items.length && n > 0} mixed={n > 0 && n < items.length} onChange={(v) => setMany(items, v)} color={color} />
+        <Checkbox checked={n === items.length && n > 0} mixed={n > 0 && n < items.length} onChange={(v) => setMany(items, v)} />
         <ChevronRight size={18} className="muted shrink-0 transition-transform" style={{ transform: open ? 'rotate(90deg)' : undefined }} />
         <Glyph name="folder" size={42} color={color} />
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2 min-w-0">
-            <span className="text-[17px] font-semibold truncate">{p.name}</span>
+            <span className="text-[16px] font-medium truncate">{p.name}</span>
             {p.path && <span className="muted text-[13px] truncate">{p.path.replace(home, '~')}</span>}
           </div>
-          <div className="h-[6px] mt-2 max-w-[420px] bar-track">
-            <motion.div className="h-full rounded-full" style={{ background: `linear-gradient(90deg, ${color}, ${color}aa)` }} animate={{ width: `${Math.max(1.5, (p.bytes / max) * 100)}%` }} />
+          <div className="h-[4px] mt-2 max-w-[420px] bar-track">
+            <motion.div className="h-full rounded-full" style={{ background: color, opacity: 0.85 }} animate={{ width: `${Math.max(1.5, (p.bytes / max) * 100)}%` }} />
           </div>
         </div>
         <span className="muted text-[14px] w-[110px] text-right shrink-0">{p.sessions.length} {p.sessions.length === 1 ? 'session' : 'sessions'}</span>
         <span className="muted text-[14px] w-[100px] text-right shrink-0">{age(p.last_used)}</span>
         <div className="w-[96px] text-right shrink-0">
-          <span className="num font-bold text-[19px]">{s.value}</span>
-          <span className="num font-semibold text-[13px] muted ml-1">{s.unit}</span>
+          <span className="num font-semibold text-[18px]">{s.value}</span>
+          <span className="num text-[13px] unit ml-1">{s.unit}</span>
         </div>
       </div>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden pb-2">
-            {p.sessions.map((ss) => <SessionRow key={ss.id} item={sessionItem(tool, p, ss)} s={ss} color={color} />)}
+            {p.sessions.map((ss) => <SessionRow key={ss.id} item={sessionItem(tool, p, ss)} s={ss} />)}
           </motion.div>
         )}
       </AnimatePresence>
@@ -123,19 +123,19 @@ const ProjectRow: React.FC<{ tool: AgentTool; p: AgentProject; max: number; inde
   );
 };
 
-const SessionRow: React.FC<{ item: SelItem; s: AgentSession; color: string }> = ({ item, s, color }) => {
+const SessionRow: React.FC<{ item: SelItem; s: AgentSession }> = ({ item, s }) => {
   const picked = useStore((st) => st.selection.has(item.key));
   const toggle = useStore((st) => st.toggle);
   const b = splitBytes(s.bytes);
   return (
-    <motion.div layout exit={{ opacity: 0, x: 40, height: 0 }} className="flex items-center gap-4 pl-[74px] pr-4 py-2.5 rounded-2xl row-hover mx-1" onClick={() => toggle(item)} style={{ background: picked ? `${color}14` : undefined }}>
-      <Checkbox checked={picked} onChange={() => toggle(item)} color={color} size={20} />
+    <motion.div layout exit={{ opacity: 0, x: 40, height: 0 }} className="flex items-center gap-4 pl-[74px] pr-4 py-2.5 rounded-2xl row-hover mx-1" onClick={() => toggle(item)} style={{ background: picked ? 'var(--accent-soft)' : undefined }}>
+      <Checkbox checked={picked} onChange={() => toggle(item)} size={20} />
       <span className="flex-1 min-w-0 text-[15px] font-medium truncate">{s.title ?? s.id}</span>
       <span className="muted text-[14px] w-[110px] text-right shrink-0">{date(s.started ?? s.last_used)}</span>
       <span className="muted text-[14px] w-[100px] text-right shrink-0">{age(s.last_used)}</span>
       <div className="w-[96px] text-right shrink-0">
-        <span className="num font-bold text-[16px]">{b.value}</span>
-        <span className="num font-semibold text-[12px] muted ml-1">{b.unit}</span>
+        <span className="num font-semibold text-[15px]">{b.value}</span>
+        <span className="num text-[12px] unit ml-1">{b.unit}</span>
       </div>
     </motion.div>
   );
