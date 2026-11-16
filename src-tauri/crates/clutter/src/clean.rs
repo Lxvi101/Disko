@@ -274,6 +274,11 @@ pub fn check_path(path: &Path) -> Result<(), String> {
     if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return Err("Not an absolute path".into());
     }
+    // Only paths in their normal form ("a/b", not "a//b", "a/./b" or "a/b/").
+    let normal: std::path::PathBuf = path.components().collect();
+    if normal.as_os_str() != path.as_os_str() {
+        return Err("Not a plain absolute path".into());
+    }
     if fs::symlink_metadata(path).is_err() {
         return Err("Already gone.".into());
     }

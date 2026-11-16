@@ -105,6 +105,10 @@ pub struct Routine {
     pub last_run: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_freed: Option<u64>,
+    /// Last set up or changed by an agent over MCP. Such routines only ever move things to the
+    /// Trash (or run a tool's own cleanup) until the user changes them in Disko.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub by_agent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

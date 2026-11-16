@@ -340,6 +340,9 @@ pub fn call(srv: &Server, name: &str, a: &Value) -> Result<Value, String> {
         "add_rule" => add_rule(srv, a),
         "remove_rule" => {
             let id = s(a, "id").ok_or("`id` is required.")?;
+            if srv.store().memory().rules.iter().any(|r| r.id == id && r.source == Source::User) {
+                return Err("That rule is the user's own; only they can remove it in Disko.".into());
+            }
             srv.store().apply(MemoryOp::RemoveRule { id: id.to_string() })?;
             srv.backend().memory_changed();
             Ok(json!({ "removed": id }))
@@ -347,6 +350,9 @@ pub fn call(srv: &Server, name: &str, a: &Value) -> Result<Value, String> {
         "set_routine" => set_routine(srv, a, t),
         "remove_routine" => {
             let id = s(a, "id").ok_or("`id` is required.")?;
+            if srv.store().memory().routines.iter().any(|r| r.id == id && !r.by_agent) {
+                return Err("That routine is the user's; only they can remove it in Disko. You can switch it off with set_routine.".into());
+            }
             srv.store().apply(MemoryOp::RemoveRoutine { id: id.to_string() })?;
             srv.backend().memory_changed();
             Ok(json!({ "removed": id }))
@@ -836,7 +842,10 @@ fn set_routine(srv: &Server, a: &Value, t: i64) -> Result<Value, String> {
         review: false,
         last_run: None,
         last_freed: None,
+        by_agent: true,
     });
+    // Whatever an agent touches only ever goes to the Trash until the user changes it in Disko.
+    r.by_agent = true;
     if let Some(x) = s(a, "title") {
         r.title = x.to_string();
     }

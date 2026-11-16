@@ -432,7 +432,29 @@ impl Hub {
     pub fn clean(&self, ids: &[String], trash_ids: &[String], paths: &[String]) -> CleanResult {
         let mut findings: Vec<Finding> = {
             let map = self.findings.read().unwrap();
-            ids.iter().chain(trash_ids.iter()).filter_map(|id| map.get(id).cloned()).collect()
+            let mut v: Vec<Finding> = ids.iter().chain(trash_ids.iter()).filter_map(|id| map.get(id).cloned()).collect();
+            // A tool command (e.g. `brew cleanup`) removes everything it owns, so every finding
+            // sharing it joins the request: its keep/busy checks apply and it's reported honestly.
+            let cmds: Vec<Vec<String>> = v
+                .iter()
+                .filter_map(|f| match &f.action {
+                    disko_core::Action::Command { argv, .. } if !trash_ids.contains(&f.id) => Some(argv.clone()),
+                    _ => None,
+                })
+                .collect();
+            if !cmds.is_empty() {
+                for f in map.values() {
+                    if v.iter().any(|x| x.id == f.id) {
+                        continue;
+                    }
+                    if let disko_core::Action::Command { argv, .. } = &f.action {
+                        if cmds.contains(argv) {
+                            v.push(f.clone());
+                        }
+                    }
+                }
+            }
+            v
         };
         for f in findings.iter_mut() {
             if trash_ids.contains(&f.id) && f.action != disko_core::Action::Trash {
@@ -534,6 +556,14 @@ impl Hub {
     }
 
     pub fn memory_update(&self, op: MemoryOp) -> Result<Memory, String> {
+        // Changes made in the app are the user's own.
+        let op = match op {
+            MemoryOp::SetRoutine { mut routine } => {
+                routine.by_agent = false;
+                MemoryOp::SetRoutine { routine }
+            }
+            other => other,
+        };
         let m = self.store.lock().unwrap().apply(op)?;
         self.memory_changed();
         Ok(m)
@@ -573,8 +603,14 @@ impl Hub {
             let mut s = self.store.lock().unwrap();
             disko_memory::select(&all, routine, now, s.keep())
         };
-        let ids: Vec<String> = picked.iter().map(|f| f.id.clone()).collect();
-        let r = self.clean(&ids, &[], &[]);
+        // Agent-made routines only move things to the Trash (tool commands still run as such).
+        let (ids, trash): (Vec<String>, Vec<String>) = if routine.by_agent {
+            let (cmd, rest): (Vec<&Finding>, Vec<&Finding>) = picked.iter().partition(|f| matches!(f.action, disko_core::Action::Command { .. }));
+            (cmd.iter().map(|f| f.id.clone()).collect(), rest.iter().map(|f| f.id.clone()).collect())
+        } else {
+            (picked.iter().map(|f| f.id.clone()).collect(), Vec::new())
+        };
+        let r = self.clean(&ids, &trash, &[]);
         let _ = self.store.lock().unwrap().record_run(&routine.id, now, r.freed);
         (self.emit)("memory", json!(self.memory()));
         r

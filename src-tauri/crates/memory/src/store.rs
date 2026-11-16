@@ -538,7 +538,7 @@ mod tests {
         assert!(s.apply(MemoryOp::Keep { pattern: "relative".into(), note: None, source: None }).is_err());
         assert!(s.apply(MemoryOp::Unkeep { id: "nope".into(), source: None }).is_err());
         assert!(s.apply(MemoryOp::RemoveRoutine { id: "nope".into() }).is_err());
-        let bad = Routine { id: String::new(), title: "x".into(), select: Default::default(), every_days: 2, min_age_days: 0, enabled: true, review: false, last_run: None, last_freed: None };
+        let bad = Routine { id: String::new(), title: "x".into(), select: Default::default(), every_days: 2, min_age_days: 0, enabled: true, review: false, last_run: None, last_freed: None, by_agent: false };
         assert!(s.apply(MemoryOp::SetRoutine { routine: bad }).is_err());
         assert!(s.apply(MemoryOp::CommunityUrl { url: Some("http://evil".into()) }).is_err());
         let _ = std::fs::remove_dir_all(&d);

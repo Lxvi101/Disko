@@ -562,3 +562,14 @@ fn texlive_years_are_four_digit_folders_only() {
     assert_eq!(found[0].paths.len(), 1);
     assert!(found[0].paths[0].ends_with("/2023"), "{:?}", found[0].paths);
 }
+
+#[test]
+fn check_path_needs_the_plain_form() {
+    let dir = std::env::temp_dir().join(format!("disko-plain-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("x")).unwrap();
+    let real = std::fs::canonicalize(&dir).unwrap();
+    assert!(disko_clutter::clean::check_path(&real.join("x")).is_ok());
+    assert!(disko_clutter::clean::check_path(std::path::Path::new(&format!("{}/./x", real.display()))).is_err());
+    assert!(disko_clutter::clean::check_path(std::path::Path::new(&format!("{}//x", real.display()))).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}

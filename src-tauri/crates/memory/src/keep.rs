@@ -31,7 +31,9 @@ impl KeepSet {
         if self.entries.is_empty() {
             return None;
         }
-        let path = path.to_lowercase();
+        // "a//b" and "a/./b" are the same path; compare the normal form.
+        let normal: std::path::PathBuf = std::path::Path::new(path).components().collect();
+        let path = normal.to_string_lossy().to_lowercase();
         self.entries.iter().find(|(_, g)| g.matches_or_inside(&path) || g.may_match_below(&path)).map(|(e, _)| e)
     }
 
@@ -64,6 +66,9 @@ mod tests {
         assert!(k.is_kept("/Users/me/Dev/app/node_modules/.cache"));
         assert!(k.is_kept("/Users/me/Dev/app")); // contains a kept path
         assert!(!k.is_kept("/Users/me/Dev/other/node_modules"));
+        // Oddly written paths are the same path.
+        assert!(k.is_kept("/Users/me/Dev/./App//node_modules"));
+        assert!(k.is_kept("/Users/me/Dev/App/node_modules/"));
         assert!(k.is_kept("/Users/me/Models/llama.gguf"));
         assert!(k.is_kept("/Users/me/Models")); // could contain a match
         assert!(!k.is_kept("/Users/me/Models2"));

@@ -20,6 +20,7 @@ pub fn suggested() -> Vec<Routine> {
         review: false,
         last_run: None,
         last_freed: None,
+        by_agent: false,
     }]
 }
 
