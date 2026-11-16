@@ -99,6 +99,10 @@ let toastId = 0;
 /** Finding ids being removed right now; upserts for them are ignored until the clean returns. */
 const pending = new Set<string>();
 let refreshTimer = 0;
+let staleApps = false;
+let staleSessions = false;
+/** Where coding agents keep their sessions (relative to home). */
+const AGENT_DIRS = ['.claude', '.codex', '.t3', '.cursor', 'Library/Application Support/T3 Code'];
 
 export const useStore = create<State>((set, get) => ({
   boot: null,
@@ -146,13 +150,21 @@ export const useStore = create<State>((set, get) => ({
         for (const id of ids) sel.delete(`f:${id}`);
         return { findings: next, selection: sel };
       })),
-      on('tree:changed', () => {
+      on('tree:changed', ({ paths }) => {
         set((s) => ({ treeVersion: s.treeVersion + 1 }));
+        // Apps and sessions are expensive to measure: refresh only when their folders changed,
+        // and only while they're on screen (otherwise on the next visit).
+        const home = get().boot?.home ?? '';
+        const touches = (roots: string[]) => paths.some((p) => roots.some((r) => p === r || p.startsWith(r + '/') || r.startsWith(p + '/')));
+        if (get().apps && touches(['/Applications', `${home}/Applications`])) staleApps = true;
+        if (get().sessions && touches(AGENT_DIRS.map((d) => `${home}/${d}`))) staleSessions = true;
+        if (!staleApps && !staleSessions) return;
         clearTimeout(refreshTimer);
         refreshTimer = window.setTimeout(() => {
-          if (get().apps) get().refreshApps();
-          if (get().sessions) get().refreshSessions();
-        }, 400);
+          const sec = get().section;
+          if (staleApps && sec === 'apps') { staleApps = false; get().refreshApps(); }
+          if (staleSessions && sec === 'agents') { staleSessions = false; get().refreshSessions(); }
+        }, 1500);
       }),
       on('volume', (v) => set({ volume: v })),
       on('memory', (m) => set({ memory: m })),
@@ -165,8 +177,8 @@ export const useStore = create<State>((set, get) => ({
 
   go: (section) => {
     set({ section });
-    if (section === 'apps' && !get().apps) get().refreshApps();
-    if (section === 'agents' && !get().sessions) get().refreshSessions();
+    if (section === 'apps' && (!get().apps || staleApps)) { staleApps = false; get().refreshApps(); }
+    if (section === 'agents' && (!get().sessions || staleSessions)) { staleSessions = false; get().refreshSessions(); }
     if (section === 'memory') {
       get().refreshMemory();
       api.mcpStatus().then((mcp) => set({ mcp })).catch(() => {});

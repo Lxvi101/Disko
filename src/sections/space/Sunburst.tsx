@@ -42,6 +42,17 @@ function layout(input: MapNode, dark: boolean): Layout {
   });
   return { arcs, byDepth, byPath, root: input };
 }
+/** Did any arc move by more than ~0.4°, or a noticeable arc appear or vanish? */
+function visibleChange(prev: Map<string, { x0: number; x1: number; depth: number }>, lay: Layout): boolean {
+  const MOVE = 0.007, SIZE = 0.012;
+  for (const a of lay.arcs) {
+    const p = prev.get(a.data.path);
+    if (!p || p.depth !== a.depth) { if (a.x1 - a.x0 > SIZE) return true; continue; }
+    if (Math.abs(p.x0 - a.x0) > MOVE || Math.abs(p.x1 - a.x1) > MOVE) return true;
+  }
+  for (const [path, p] of prev) if (!lay.byPath.has(path) && p.x1 - p.x0 > SIZE) return true;
+  return false;
+}
 const rank = (n: MapNode) => (n.kind === 'hidden' ? 2 : n.kind === 'other' ? 1 : 0);
 const ease = (t: number) => 1 - Math.pow(1 - t, 3);
 const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -144,8 +155,10 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
   // Live growth: arcs tween from where they were drawn last.
   const shown = useRef(new Map<string, { x0: number; x1: number; depth: number; color: string }>());
   const tween = useRef<{ from: Map<string, { x0: number; x1: number; depth: number; color: string }>; t0: number } | null>(null);
+  // Only animate changes you can see; small live updates (a cache growing) just redraw.
   useLayoutEffect(() => {
-    if (shown.current.size && !reduced()) tween.current = { from: shown.current, t0: performance.now() };
+    if (!shown.current.size || reduced() || !visibleChange(shown.current, lay)) return;
+    tween.current = { from: shown.current, t0: performance.now() };
   }, [lay]);
 
   const draw = useCallback((now: number) => {

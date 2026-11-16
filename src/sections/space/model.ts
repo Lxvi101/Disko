@@ -86,38 +86,49 @@ export function useSpaceTree(): { tree: MapNode | null; loading: boolean } {
     return () => { live = false; };
   }, [path, depth]);
 
-  const refetch = () => {
-    last.current = performance.now();
-    api.tree(path === '/' ? null : path, depth).then(setRaw).catch(() => {});
-  };
-
-  // Removals, undo and outside changes: show them now.
+  // Removals, undo, outside changes and the streaming scan: refetch at most ~1/s, and keep the
+  // current tree when nothing visible changed so views don't re-layout or re-animate.
+  const accept = (t: TreeNode) => setRaw((old) => (old && similar(old, t) ? old : t));
   useEffect(() => {
-    if (version) refetch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version]);
-
-  // The streaming scan: at most ~1 fetch per second.
-  useEffect(() => {
-    if (!scanTick) return;
+    if (!version && !scanTick) return;
     const run = () => {
       last.current = performance.now();
-      api.tree(path === '/' ? null : path, depth).then(setRaw).catch(() => {});
+      api.tree(path === '/' ? null : path, depth).then(accept).catch(() => {});
     };
     const since = performance.now() - last.current;
     clearTimeout(timer.current);
-    if (since > 900) run();
-    else timer.current = window.setTimeout(run, 900 - since);
+    if (since > 1000) run();
+    else timer.current = window.setTimeout(run, 1000 - since);
     return () => clearTimeout(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanTick]);
+  }, [version, scanTick]);
 
   // While the next folder loads, the previous one stays up so views can morph between them.
+  // Only the hidden-space slices matter here; free space alone ticking must not redraw the map.
+  const hiddenKey = volume?.hidden.map((h) => `${h.kind}:${Math.round(h.bytes / 2 ** 27)}`).join(',') ?? '';
   const tree = useMemo(() => {
     if (!raw) return null;
     const t = withHidden(applyGone(raw, gone), volume);
     return { ...t, children: t.children?.map(merge) };
-  }, [raw, gone, volume]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raw, gone, hiddenKey]);
   useEffect(() => { setSpaceTree(tree); }, [tree, setSpaceTree]);
   return { tree, loading: loading && !tree };
+}
+
+/**
+ * Same folders in the same order, the sizes shown as text (the folder and its children) within
+ * 1 MB, and nothing deeper moved by more than ~0.05% of the whole.
+ */
+export function similar(a: TreeNode, b: TreeNode): boolean {
+  const tol = Math.max(a.bytes, b.bytes) * 0.0005;
+  const walk = (x: TreeNode, y: TreeNode, depth: number): boolean => {
+    if (x.path !== y.path || x.kind !== y.kind || x.clutter !== y.clutter) return false;
+    if (Math.abs(x.bytes - y.bytes) > (depth <= 1 ? 2 ** 20 : tol)) return false;
+    const xc = x.children ?? [], yc = y.children ?? [];
+    if (xc.length !== yc.length) return false;
+    for (let i = 0; i < xc.length; i++) if (!walk(xc[i], yc[i], depth + 1)) return false;
+    return true;
+  };
+  return walk(a, b, 0);
 }

@@ -13,14 +13,13 @@ import type { Category, Finding, Routine } from '../lib/types';
 
 export const Clutter: React.FC = () => {
   const findings = useStore((s) => s.findings);
-  const progress = useStore((s) => s.progress);
+  const scanning = useStore((s) => !!s.progress && s.progress.phase !== 'done');
   const remove = useStore((s) => s.remove);
   const [open, setOpen] = useState<Category | null>(null);
-  const list = Object.values(findings);
+  const list = useMemo(() => Object.values(findings), [findings]);
   const total = list.reduce((a, f) => a + f.bytes, 0);
   const safe = list.filter((f) => f.safety === 'safe' && !f.busy && f.category !== 'trash');
   const safeBytes = safe.reduce((a, f) => a + f.bytes, 0);
-  const scanning = progress && progress.phase !== 'done';
   const groups = useMemo(() => {
     const m = new Map<Category, Finding[]>();
     for (const f of list) m.set(f.category, [...(m.get(f.category) ?? []), f]);

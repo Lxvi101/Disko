@@ -100,14 +100,13 @@ body,
     var(--bg);
 }
 .app-bg::before {
+  /* Static on purpose: an animated layer under every frosted panel makes each frame re-blur the window. */
   content: '';
   position: absolute;
-  inset: -20%;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
-  background: radial-gradient(40% 32% at 40% 6%, var(--bloom-2), transparent 70%);
-  filter: blur(40px);
-  animation: drift 38s ease-in-out infinite alternate;
+  background: radial-gradient(46% 38% at 40% 4%, var(--bloom-2), transparent 72%);
 }
 .app-bg::after {
   content: '';
@@ -118,10 +117,6 @@ body,
   opacity: var(--grain);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   mix-blend-mode: overlay;
-}
-@keyframes drift {
-  from { transform: translate3d(-4%, 0, 0) scale(1); }
-  to { transform: translate3d(6%, 3%, 0) scale(1.08); }
 }
 
 /* Big numbers: SF Pro Display, tabular, tight. */
@@ -230,3 +225,9 @@ button { cursor: default; }
   background-size: 200% 100%;
   animation: shimmer 1.8s linear infinite;
 }
+
+/* Disabled controls swallow hover in WebKit; let their tip wrapper receive it instead. */
+.tip-host { display: inline-flex; }
+.tip-host.block { display: block; }
+.tip-host :disabled,
+.tip-host [aria-disabled='true'] { pointer-events: none; }
