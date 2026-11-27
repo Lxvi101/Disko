@@ -413,9 +413,11 @@ impl Tree {
     fn base_view(&self, i: u32, inherited: u8) -> TreeNode {
         let u = i as usize;
         let c = if self.cat[u] != NO_CAT { self.cat[u] } else { inherited };
+        let path = self.path(i);
         TreeNode {
+            protected: disko_core::paths::is_protected(std::path::Path::new(&path)),
             name: self.name(i).to_string(),
-            path: self.path(i),
+            path,
             kind: if self.flags[u] & F_DIR != 0 { "dir" } else { "file" }.into(),
             bytes: self.bytes[u],
             files: self.files[u] as u64,
@@ -474,6 +476,7 @@ impl Tree {
                 clutter: cat_of(here),
                 error: None,
                 children: None,
+                protected: false,
             });
         }
         node.children = Some(out);

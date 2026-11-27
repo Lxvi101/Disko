@@ -6,40 +6,87 @@ import { useStore, sel } from '../../store';
 import { splitBytes, parentOf } from '../../lib/format';
 import { NodeIcon } from '../../lib/icons';
 import { CAT } from '../../lib/categories';
-import { colorOf, hueFor, type MapNode } from './model';
+import { wheelColor, type MapNode } from './model';
+import { endDrag, openMenu, startDrag } from '../../lib/interact';
 
-type Arc = HierarchyRectangularNode<MapNode> & { color: string };
+const pickable = (n: MapNode) => n.kind === 'dir' || n.kind === 'file';
+
+type Arc = HierarchyRectangularNode<MapNode> & { color: string; outer: number };
 interface Layout { arcs: Arc[]; byDepth: Arc[][]; byPath: Map<string, Arc>; root: MapNode }
 
-const RING_W = [1, 0.86, 0.72, 0.58];
-const RINGS = RING_W.length;
-const GAP = 1.3; // px between arcs
+// Five equal rings you can read, then three thin ones that only show where depth continues.
+const MAIN = 5;
+const FRINGE = 3;
+const RINGS = MAIN + FRINGE;
+const FRINGE_W = 0.16;
+const SEP = 1.25; // px cut between arcs
 const TWEEN = 520;
 
 function own(n: MapNode) {
   return Math.max(0, n.bytes - (n.children?.reduce((a, c) => a + c.bytes, 0) ?? 0));
 }
 
+// The overview stays calm: each ring shows a few of a folder's largest items and folds the rest into
+// one quiet slice. Opening a folder recomputes this, so everything becomes explorable as you go.
+const LIMIT = [8, 12, 10, 8, 6, 4, 3, 2];
+const MIN_SHARE = [0, 0.025, 0.035, 0.05, 0.06, 0.09, 0.12, 0.18];
+const MIN_TOTAL = [0, 0.0025, 0.003, 0.004, 0.0045, 0.005, 0.006, 0.008];
+
+function simplify(root: MapNode): MapNode {
+  const walk = (n: MapNode, depth: number): MapNode => {
+    if (!n.children?.length || depth >= RINGS) return n.children ? { ...n, children: undefined } : n;
+    const min = Math.max(root.bytes * MIN_TOTAL[depth], n.bytes * MIN_SHARE[depth]);
+    const keep: MapNode[] = [];
+    const fold: MapNode[] = [];
+    let i = 0;
+    for (const c of n.children) {
+      if (c.kind === 'hidden') keep.push(c);
+      else if (c.kind !== 'other' && c.bytes > 0 && c.bytes >= min && i++ < LIMIT[depth]) keep.push(walk(c, depth + 1));
+      else fold.push(c);
+    }
+    if (fold.length) {
+      const items = fold.reduce((a, c) => a + (c.kind === 'other' ? Number(/^\d+/.exec(c.name)?.[0] ?? 1) : 1), 0);
+      keep.push({
+        name: items === 1 ? '1 smaller item' : `${items.toLocaleString()} smaller items`,
+        path: `${n.path === '/' ? '' : n.path}/…`, kind: 'other',
+        bytes: fold.reduce((a, c) => a + c.bytes, 0), files: fold.reduce((a, c) => a + c.files, 0),
+      });
+    }
+    return { ...n, children: keep };
+  };
+  return walk(root, 0);
+}
+
 function layout(input: MapNode, dark: boolean): Layout {
-  const tree = input;
-  const root = hierarchy<MapNode>(tree, (d) => d.children).sum(own);
+  const root = hierarchy<MapNode>(simplify(input), (d) => d.children).sum(own);
   root.sort((a, b) => rank(a.data) - rank(b.data) || (b.value ?? 0) - (a.value ?? 0));
   const part = partition<MapNode>().size([2 * Math.PI, RINGS + 1])(root);
   const arcs: Arc[] = [];
   const byDepth: Arc[][] = Array.from({ length: RINGS + 1 }, () => []);
   const byPath = new Map<string, Arc>();
-  part.children?.forEach((b, i) => {
-    const hue = hueFor(i);
+  let branch = 0;
+  part.children?.forEach((b) => {
+    const idx = b.data.kind === 'dir' || b.data.kind === 'file' ? branch++ : 0;
+    const span = Math.max(1e-6, b.x1 - b.x0);
+    const spread = Math.min(36, span * 14);
     b.each((d) => {
-      if (d.depth < 1 || d.depth > RINGS || d.x1 - d.x0 < 0.0025) return;
-      const shift = ((d.x0 + d.x1) / 2 - b.x0) / Math.max(1e-6, b.x1 - b.x0) - 0.5;
+      if (d.depth < 1 || d.depth > RINGS || d.x1 - d.x0 < 0.0006) return;
+      const shift = (((d.x0 + d.x1) / 2 - b.x0) / span - 0.5) * spread;
       const a = d as Arc;
-      a.color = colorOf(d.data, hue + shift * 26, d.depth, dark);
+      a.color = wheelColor(d.data, idx, shift, d.depth, dark);
+      a.outer = d.depth;
       arcs.push(a);
       byDepth[d.depth].push(a);
       byPath.set(d.data.path, a);
     });
   });
+  // How far out each arc's drawn branch reaches, so the clutter halo can sit on the wheel's edge.
+  for (let i = arcs.length - 1; i >= 0; i--) {
+    const a = arcs[i];
+    const p = a.parent as Arc | null;
+    if (p && p.depth >= 1 && byPath.get(p.data.path) === p) p.outer = Math.max(p.outer, a.outer);
+  }
+  for (const arr of byDepth) arr.sort((a, b) => a.x0 - b.x0);
   return { arcs, byDepth, byPath, root: input };
 }
 /** Did any arc move by more than ~0.4°, or a noticeable arc appear or vanish? */
@@ -103,19 +150,23 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
   const toggle = useStore((s) => s.toggle);
   const selection = useStore((s) => s.selection);
   const dark = useStore((s) => s.dark);
-  const R = size / 2 - 22;
   const findings = useStore((s) => s.findings);
-  const inner = R * 0.32;
+  const R = size / 2 - 12;
+  const inner = R * 0.25;
   const bounds = useMemo(() => {
-    const total = RING_W.reduce((a, b) => a + b, 0);
-    const unit = (R - inner) / total;
+    const unit = (R - inner - 3) / (MAIN + FRINGE * FRINGE_W);
     const b: { r0: number; r1: number }[] = [{ r0: 0, r1: inner }];
     let acc = inner;
-    for (const w of RING_W) { b.push({ r0: acc + GAP, r1: acc + w * unit }); acc += w * unit; }
+    for (let d = 1; d <= RINGS; d++) {
+      const w = (d <= MAIN ? 1 : FRINGE_W) * unit;
+      const r0 = acc + (d === MAIN + 1 ? 3 : 0); // a little air before the depth rings
+      b.push({ r0, r1: r0 + w });
+      acc = r0 + w;
+    }
     return b;
   }, [R, inner]);
 
-  // Clutter halo: an outer orbit showing exactly where reclaimable space sits, by category.
+  // Clutter halo: a thin line on the wheel's edge showing where reclaimable space sits, by category.
   const halo = useMemo(() => {
     const per = new Map<Arc, Map<string, number>>();
     for (const f of Object.values(findings)) {
@@ -133,19 +184,19 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
         per.set(best, m);
       }
     }
-    const segs: { x0: number; x1: number; color: string; path: string }[] = [];
+    const segs: { x0: number; x1: number; r: number; color: string; path: string }[] = [];
     for (const [a, m] of per) {
       const v = a.value || a.data.bytes || 1;
       let x = a.x0;
       for (const [cat, b] of [...m].sort((p, q) => q[1] - p[1])) {
         const w = Math.min(a.x1 - x, ((a.x1 - a.x0) * b) / v);
         if (w <= 0) break;
-        segs.push({ x0: x, x1: x + w, color: CAT[cat as keyof typeof CAT].color, path: a.data.path });
+        segs.push({ x0: x, x1: x + w, r: bounds[a.outer].r1 + 5, color: CAT[cat as keyof typeof CAT].color, path: a.data.path });
         x += w;
       }
     }
     return segs;
-  }, [findings, lay]);
+  }, [findings, lay, bounds]);
 
   const selected = useMemo(() => {
     const paths = [...selection.values()].flatMap((i) => i.paths);
@@ -178,39 +229,27 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
     if (h) { h.ancestors().forEach((a) => lineage.add(a as Arc)); h.descendants().forEach((a) => lineage.add(a as Arc)); }
     const next = new Map<string, { x0: number; x1: number; depth: number; color: string }>();
 
-    const paint = (depth: number, x0: number, x1: number, color: string, lift: number, alpha: number, picked: boolean) => {
-      const { r0, r1: rb } = bounds[depth];
-      const r1 = rb + lift;
-      const a0 = x0 - Math.PI / 2;
-      const a1 = x1 - Math.PI / 2;
-      const span = (a1 - a0) * r0 - GAP * 2;
-      if (span <= 0.3 && (a1 - a0) * r1 - GAP * 2 <= 0.6) return;
-      const cr = Math.max(0, Math.min(5, (r1 - r0) / 2 - 0.5, span / 2 - 0.5));
-      const g = GAP + cr;
-      const ir = r0 + cr;
-      const or = r1 - cr;
-      const ia0 = a0 + g / ir, ia1 = a1 - g / ir;
-      const oa0 = a0 + g / or, oa1 = a1 - g / or;
+    const sector = (depth: number, x0: number, x1: number, lift: number) => {
+      const { r0, r1 } = bounds[depth];
+      const a0 = x0 - Math.PI / 2, a1 = x1 - Math.PI / 2;
       ctx.beginPath();
-      ctx.arc(0, 0, or, oa0, Math.max(oa0, oa1));
-      if (ia1 > ia0) ctx.arc(0, 0, ir, ia1, ia0, true);
-      else ctx.lineTo(Math.cos((a0 + a1) / 2) * ir, Math.sin((a0 + a1) / 2) * ir);
+      ctx.arc(0, 0, r1 + lift, a0, a1);
+      ctx.arc(0, 0, r0, a1, a0, true);
       ctx.closePath();
+    };
+    // Fill everything first, then cut thin gaps between arcs wide enough to tell apart. Slivers
+    // too small to read stay one calm band instead of a comb of hairlines.
+    const cuts: [number, number, number, number][] = [];
+    const fill = (depth: number, x0: number, x1: number, color: string, alpha: number, lift: number, picked: boolean) => {
+      sector(depth, x0, x1, lift);
       ctx.globalAlpha = alpha;
       ctx.fillStyle = color;
-      ctx.strokeStyle = color;
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = cr * 2;
       ctx.fill();
-      if (cr > 0) ctx.stroke();
-      if (picked) {
-        ctx.fillStyle = 'rgba(255,255,255,.34)';
-        ctx.strokeStyle = 'rgba(255,255,255,.34)';
-        ctx.fill();
-        if (cr > 0) ctx.stroke();
-      }
+      if (picked) { ctx.fillStyle = 'rgba(255,255,255,.34)'; ctx.fill(); }
+      if ((x1 - x0) * bounds[depth].r1 > 3.5) cuts.push([depth, x0, x1, lift]);
     };
 
+    let lifted: [number, number, number, string, boolean] | null = null;
     for (const a of lay.arcs) {
       let { x0, x1 } = a;
       if (tw && p < 1) {
@@ -219,45 +258,50 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
         else { const m = (a.x0 + a.x1) / 2; x0 = m + (a.x0 - m) * e; x1 = m + (a.x1 - m) * e; }
       }
       next.set(a.data.path, { x0, x1, depth: a.depth, color: a.color });
-      const dim = h && !lineage.has(a);
-      paint(a.depth, x0, x1, a.color, a === h ? 6 : 0, 1, selected(a.data.path));
-      // Dim by veiling with the background, so rounded edges don't double up.
-      if (dim) paint(a.depth, x0, x1, dark ? 'rgba(7,8,12,.72)' : 'rgba(244,245,248,.72)', 0, 1, false);
+      if (a === h) { lifted = [a.depth, x0, x1, a.color, selected(a.data.path)]; continue; }
+      fill(a.depth, x0, x1, a.color, h && !lineage.has(a) ? 0.22 : 1, 0, selected(a.data.path));
     }
     if (tw && p < 1) {
       for (const [path, f] of tw.from) {
         if (lay.byPath.has(path)) continue;
         const m = (f.x0 + f.x1) / 2;
-        paint(f.depth, f.x0 + (m - f.x0) * e, f.x1 + (m - f.x1) * e, f.color, 0, 1 - e, false);
+        fill(f.depth, f.x0 + (m - f.x0) * e, f.x1 + (m - f.x1) * e, f.color, 1 - e, 0, false);
       }
     }
-    // Halo.
+    if (lifted) fill(lifted[0], lifted[1], lifted[2], lifted[3], 1, 4, lifted[4]);
     ctx.globalAlpha = 1;
-    for (const sgm of halo) {
-      if (sgm.x1 - sgm.x0 < 0.002) continue;
-      const a0 = sgm.x0 - Math.PI / 2 + 0.004, a1 = sgm.x1 - Math.PI / 2 - 0.004;
-      if (a1 <= a0) continue;
-      ctx.beginPath();
-      ctx.arc(0, 0, R + 10, a0, a1);
-      ctx.strokeStyle = sgm.color;
-      ctx.lineWidth = 4;
-      ctx.lineCap = 'round';
-      ctx.globalAlpha = h && !(hover && (sgm.path === hover || sgm.path.startsWith(hover + '/'))) ? 0.25 : 0.9;
-      ctx.stroke();
-    }
-    ctx.lineCap = 'butt';
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.lineWidth = SEP;
+    ctx.lineJoin = 'miter';
+    ctx.strokeStyle = '#000';
+    for (const [depth, x0, x1, lift] of cuts) { sector(depth, x0, x1, lift); ctx.stroke(); }
     // Soft light falling from above, matching the window's bloom.
-    ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-atop';
     const g = ctx.createLinearGradient(0, -R, 0, R);
-    g.addColorStop(0, dark ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.16)');
+    g.addColorStop(0, dark ? 'rgba(255,255,255,.06)' : 'rgba(255,255,255,.14)');
     g.addColorStop(0.6, 'rgba(255,255,255,0)');
     g.addColorStop(1, dark ? 'rgba(0,0,0,.12)' : 'rgba(0,0,0,.03)');
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(0, 0, R + 1, 0, Math.PI * 2);
+    ctx.arc(0, 0, R + 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
+    // Halo, hugging the outline of the branch that holds the clutter.
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 3;
+    for (const sgm of halo) {
+      const r = sgm.r;
+      const pad = Math.min(0.004, (sgm.x1 - sgm.x0) / 4);
+      const a0 = sgm.x0 - Math.PI / 2 + pad, a1 = sgm.x1 - Math.PI / 2 - pad;
+      if ((a1 - a0) * r < 1) continue;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, a0, a1);
+      ctx.strokeStyle = sgm.color;
+      ctx.globalAlpha = h && !(hover && (sgm.path === hover || sgm.path.startsWith(hover + '/'))) ? 0.25 : 0.95;
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    ctx.globalAlpha = 1;
     shown.current = next;
     if (p >= 1) tween.current = null;
     return p >= 1;
@@ -277,15 +321,15 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
     const d = Math.hypot(x, y);
     if (d < inner) return 'center';
     let depth = 0;
-    for (let i = 1; i <= RINGS; i++) if (d >= bounds[i].r0 - GAP && d < bounds[i].r1 + 1) { depth = i; break; }
+    // Thin depth rings get a forgiving target.
+    for (let i = 1; i <= RINGS; i++) if (d >= bounds[i].r0 - 1.5 && d < bounds[i].r1 + (i > MAIN ? 3 : 1)) { depth = i; break; }
     if (!depth) return null;
     const theta = (Math.atan2(y, x) + Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI);
     const arr = lay.byDepth[depth];
     let lo = 0, hi = arr.length - 1;
-    const sorted = arr; // partition order is angular within depth
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      const n = sorted[mid];
+      const n = arr[mid];
       if (theta < n.x0) hi = mid - 1;
       else if (theta >= n.x1) lo = mid + 1;
       else return n;
@@ -313,11 +357,23 @@ const Wheel: React.FC<{ lay: Layout; size: number }> = ({ lay, size }) => {
           (e.currentTarget as HTMLElement).style.cursor = t === 'center' ? (canUp ? 'pointer' : 'default') : t && t.data.kind === 'dir' ? 'pointer' : 'default';
         }}
         onMouseLeave={() => { setHover(null); setOverCenter(false); }}
+        draggable
+        onDragStart={(e) => {
+          const t = hit(e);
+          if (!t || t === 'center' || !pickable(t.data) || t.data.protected) return e.preventDefault();
+          startDrag(e, sel.node(t.data));
+        }}
+        onDragEnd={endDrag}
+        onContextMenu={(e) => {
+          const t = hit(e);
+          if (!t || t === 'center' || !pickable(t.data)) return e.preventDefault();
+          openMenu(e, sel.node(t.data), { folder: t.data.kind === 'dir' ? t.data.path : undefined });
+        }}
         onClick={(e) => {
           const t = hit(e);
           if (t === 'center') { const up = parentOf(lay.root.path); if (up) openFolder(up); return; }
           if (!t || t.data.kind === 'hidden' || t.data.kind === 'other') return;
-          if (e.metaKey || e.altKey || t.data.kind === 'file') toggle(sel.node(t.data));
+          if (e.metaKey || e.altKey || t.data.kind === 'file') { if (!t.data.protected) toggle(sel.node(t.data)); }
           else openFolder(t.data.path);
         }}
       />

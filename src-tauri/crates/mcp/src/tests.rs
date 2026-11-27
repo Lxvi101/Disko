@@ -46,6 +46,7 @@ fn node(path: &str, bytes: u64) -> TreeNode {
         clutter: None,
         error: None,
         children: None,
+        protected: false,
     }
 }
 

@@ -42,6 +42,8 @@ export interface TreeNode {
   clutter?: Category;
   error?: string;
   children?: TreeNode[];
+  /** The protected-path guard refuses to remove it; don't offer to. */
+  protected?: boolean;
 }
 
 export interface HiddenSpace {

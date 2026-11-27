@@ -7,6 +7,7 @@ import { CATEGORIES, type CategoryMeta } from '../lib/categories';
 import { age, splitBytes, bytes } from '../lib/format';
 import { GlassIcon, Icon } from '../lib/icons';
 import { Checkbox } from '../components/ui/Checkbox';
+import { itemProps } from '../lib/interact';
 import { HoldButton } from '../components/ui/HoldButton';
 import { Tip } from '../components/ui/Tip';
 import type { Category, Finding, Routine } from '../lib/types';
@@ -167,9 +168,11 @@ const FindingRow: React.FC<{ f: Finding }> = ({ f }) => {
   const toggle = useStore((s) => s.toggle);
   const remove = useStore((s) => s.remove);
   const item = sel.finding(f);
+  const home = useStore((st) => st.boot?.home ?? '');
   const s = splitBytes(f.bytes);
   const row = (
     <div
+      {...itemProps(item)}
       className="group flex items-center gap-4 px-3 py-3 rounded-2xl row-hover"
       style={{ opacity: f.busy ? 0.45 : 1, background: picked ? 'var(--accent-soft)' : undefined }}
       onClick={() => !f.busy && toggle(item)}
@@ -181,7 +184,10 @@ const FindingRow: React.FC<{ f: Finding }> = ({ f }) => {
           <span className="text-[15px] font-medium truncate">{f.title}</span>
           {f.detail && <span className="muted text-[14px] truncate">{f.detail}</span>}
         </div>
-        <div className="muted text-[13px] truncate mt-0.5">{f.busy ?? f.why}</div>
+        {/* Where it is; why it's clutter on hover. */}
+        {f.busy ? <div className="text-[13px] truncate mt-0.5" style={{ color: 'var(--warn)' }}>{f.busy}</div> : (
+          <Tip content={f.why} className="block min-w-0"><div className="dim text-[13px] truncate mt-0.5">{where(f.paths, home) || f.why}</div></Tip>
+        )}
       </div>
       <div className="flex items-center gap-2.5 muted shrink-0">
         {f.action.type === 'command' && <Tip content={<>Disko asks <b>{f.action.label}</b> to clean it</>}><Terminal size={16} /></Tip>}
@@ -207,6 +213,13 @@ const FindingRow: React.FC<{ f: Finding }> = ({ f }) => {
     </motion.div>
   );
 };
+
+/** "~/Documents/App/target", or "~/Documents/App + 2 more" for several places. */
+export function where(paths: string[], home: string): string {
+  if (!paths.length) return '';
+  const short = (p: string) => (home && (p === home || p.startsWith(home + '/')) ? '~' + p.slice(home.length) : p);
+  return paths.length === 1 ? short(paths[0]) : `${short(paths[0])} + ${paths.length - 1} more`;
+}
 
 const INTERVALS = [1, 2, 7, 14, 30];
 

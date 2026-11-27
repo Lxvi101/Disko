@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { hierarchy, treemap, treemapSquarify, type HierarchyRectangularNode } from 'd3-hierarchy';
 import { Check } from 'lucide-react';
 import { useStore, sel } from '../../store';
+import { itemProps } from '../../lib/interact';
 import { splitBytes } from '../../lib/format';
 import { NodeIcon } from '../../lib/icons';
 import { catOf, tint } from '../../lib/categories';
@@ -71,7 +72,8 @@ const Block: React.FC<{ t: Tile; hue: number; depth: number; ox?: number; oy?: n
   const showLabel = !headed && w > 96 && h > 64;
   const showIcon = !headed && w > 44 && h > 44 && (!showLabel || h > 116);
   const s = splitBytes(t.value ?? n.bytes);
-  const selectable = n.kind === 'dir' || n.kind === 'file';
+  const pickable = n.kind === 'dir' || n.kind === 'file';
+  const selectable = pickable && !n.protected;
   const r = Math.min(18, Math.max(6, Math.min(w, h) * 0.12));
   return (
     <>
@@ -87,11 +89,12 @@ const Block: React.FC<{ t: Tile; hue: number; depth: number; ox?: number; oy?: n
       >
         <Tip content={n.kind === 'hidden' ? n.why : n.error} className="block w-full h-full">
           <div
+            {...itemProps(pickable ? sel.node(n) : null, { folder: n.kind === 'dir' ? n.path : undefined })}
             onClick={(e) => {
               e.stopPropagation();
-              if (!selectable) return;
+              if (!pickable) return;
               if (n.kind === 'dir' && !e.metaKey && !e.altKey) openFolder(n.path);
-              else toggle(sel.node(n));
+              else if (selectable) toggle(sel.node(n));
             }}
             className="relative w-full h-full overflow-hidden"
             style={{

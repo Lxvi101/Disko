@@ -224,7 +224,7 @@ impl Engine {
     }
 
     fn scope(&self) -> Arc<Scope> {
-        self.scope.read().unwrap().clone()
+        self.scope.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     pub(crate) fn watch_root(&self) -> String {
@@ -246,13 +246,13 @@ impl Engine {
     /// there is nothing else yet.
     fn with_view<R>(&self, f: impl FnOnce(&Tree) -> R) -> Option<R> {
         {
-            let cur = self.current.read().unwrap();
+            let cur = self.current.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             if !cur.is_empty() {
                 return Some(f(&cur));
             }
         }
-        let b = self.building.read().unwrap().clone()?;
-        let t = b.read().unwrap();
+        let b = self.building.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()?;
+        let t = b.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         Some(f(&t))
     }
 
@@ -268,7 +268,7 @@ impl Engine {
         let age = Duration::from_secs(now_secs().saturating_sub(t.created));
         let uuid = ffi::device_uuid(self.history_device(&scope));
         let resumable = t.complete && t.event_id > 0 && !t.uuid.is_empty() && t.uuid == uuid && age < self.cfg.max_snapshot_age;
-        let mut cur = self.current.write().unwrap();
+        let mut cur = self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !cur.is_empty() {
             return None;
         }
@@ -279,12 +279,12 @@ impl Engine {
 
     /// True when there's no tree, or the loaded one can't be caught up from FSEvents history.
     pub fn needs_scan(&self) -> bool {
-        self.current.read().unwrap().is_empty() || !self.resumable.load(Ordering::Relaxed)
+        self.current.read().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty() || !self.resumable.load(Ordering::Relaxed)
     }
 
     /// Write the snapshot atomically. Returns the file size (0 when there's nothing to save).
     pub fn save_snapshot(&self) -> std::io::Result<u64> {
-        let t = self.current.read().unwrap();
+        let t = self.current.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         if t.is_empty() || !t.complete {
             return Ok(0);
         }
@@ -296,17 +296,22 @@ impl Engine {
     /// The one scan. Blocks until the walk is done (or `cancel` is set) and streams events to
     /// `sink` from walker threads. A previous tree stays queryable until the new one is complete.
     pub fn scan(&self, matcher: Arc<dyn WalkMatcher>, cancel: Arc<AtomicBool>, sink: &(dyn Fn(EngineEvent) + Sync)) -> Result<ScanStats, String> {
-        let _guard = self.scan_lock.try_lock().map_err(|_| "A scan is already running".to_string())?;
-        *self.matcher.lock().unwrap() = Some(matcher.clone());
+        // A panic in an earlier scan must not block every later one.
+        let _guard = match self.scan_lock.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return Err("A scan is already running".to_string()),
+        };
+        *self.matcher.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(matcher.clone());
         let start = Instant::now();
         let fda = self.full_disk_access();
         let scope = Arc::new(Scope::new(&self.cfg, fda, &self.snapshot_path));
-        *self.scope.write().unwrap() = scope.clone();
+        *self.scope.write().unwrap_or_else(std::sync::PoisonError::into_inner) = scope.clone();
 
         let event_id = ffi::current_event_id();
         let uuid = ffi::device_uuid(self.history_device(&scope));
         let (had_tree, prev_nodes) = {
-            let c = self.current.read().unwrap();
+            let c = self.current.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             (!c.is_empty(), c.live())
         };
         let used = volume::statfs(&scope.root_str).map(|(t, f, _)| t.saturating_sub(f)).unwrap_or(0).max(1);
@@ -317,8 +322,8 @@ impl Engine {
         t.uuid = uuid;
         t.created = now_secs();
         let b = Arc::new(RwLock::new(t));
-        *self.building.write().unwrap() = Some(b.clone());
-        *self.queued.lock().unwrap() = Some((Vec::new(), 0));
+        *self.building.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(b.clone());
+        *self.queued.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((Vec::new(), 0));
 
         let stats = Stats::default();
         let done = AtomicBool::new(false);
@@ -344,7 +349,7 @@ impl Engine {
                     }
                     tick += 1;
                     let (cur, view) = {
-                        let t = b.read().unwrap();
+                        let t = b.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                         let last = stats.last_dir.load(Ordering::Relaxed);
                         let cur = if (last as usize) < t.len() { t.path(last) } else { String::new() };
                         let view = (!had_tree && tick % 4 == 0).then(|| t.view(0, 3));
@@ -362,8 +367,8 @@ impl Engine {
         });
 
         if cancel.load(Ordering::Relaxed) {
-            *self.building.write().unwrap() = None;
-            let q = self.queued.lock().unwrap().take();
+            *self.building.write().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            let q = self.queued.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
             if let Some((items, _)) = q {
                 if !items.is_empty() {
                     let changed = self.refresh_internal(items, matcher.as_ref(), sink);
@@ -375,7 +380,7 @@ impl Engine {
             return Err("Scan cancelled".into());
         }
 
-        let mut t = std::mem::take(&mut *b.write().unwrap());
+        let mut t = std::mem::take(&mut *b.write().unwrap_or_else(std::sync::PoisonError::into_inner));
         t.complete = true;
         t.clear_pending();
         let mut st = ScanStats {
@@ -390,16 +395,16 @@ impl Engine {
             list_ms: stats.list_ns.load(Ordering::Relaxed) / 1_000_000,
             lock_wait_ms: stats.lock_wait_ns.load(Ordering::Relaxed) / 1_000_000,
         };
-        *self.current.write().unwrap() = t;
-        *self.building.write().unwrap() = None;
+        *self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner) = t;
+        *self.building.write().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.resumable.store(true, Ordering::Relaxed);
-        let q = self.queued.lock().unwrap().take();
+        let q = self.queued.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
         let mut changed = vec![scope.root_str.clone()];
         if let Some((items, max_id)) = q {
             if !items.is_empty() {
                 changed.extend(self.refresh_internal(items, matcher.as_ref(), sink));
             }
-            let mut cur = self.current.write().unwrap();
+            let mut cur = self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             cur.event_id = cur.event_id.max(max_id);
         }
         st.elapsed_ms = start.elapsed().as_millis() as u64;
@@ -507,15 +512,15 @@ impl Engine {
     /// Volume totals and where the space the walk can't see went.
     pub fn volume(&self) -> VolumeInfo {
         let scope = self.scope();
-        let apfs = self.vcache.lock().unwrap().apfs(&scope.root_str);
+        let apfs = self.vcache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).apfs(&scope.root_str);
         let (scanned, unreadable) = self.with_view(|t| (t.bytes[0], count_unreadable(t))).unwrap_or((0, 0));
         volume::info(&scope.root_str, &apfs, scanned, unreadable, scope.fda)
     }
 
     /// Approximate heap held by the trees.
     pub fn memory_bytes(&self) -> usize {
-        let b = self.building.read().unwrap().clone().map(|b| b.read().unwrap().heap_bytes()).unwrap_or(0);
-        self.current.read().unwrap().heap_bytes() + b
+        let b = self.building.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone().map(|b| b.read().unwrap_or_else(std::sync::PoisonError::into_inner).heap_bytes()).unwrap_or(0);
+        self.current.read().unwrap_or_else(std::sync::PoisonError::into_inner).heap_bytes() + b
     }
 
     // ---------------------------------------------------------------- changes
@@ -526,7 +531,7 @@ impl Engine {
     pub fn removed(&self, paths: &[String]) -> Vec<String> {
         let mut changed = BTreeSet::new();
         let mut relist = Vec::new();
-        let building = self.building.read().unwrap().clone();
+        let building = self.building.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         for p in paths {
             let p = p.trim_end_matches('/');
             if p.is_empty() {
@@ -534,7 +539,7 @@ impl Engine {
             }
             let still_there = std::fs::symlink_metadata(p).is_ok();
             {
-                let mut t = self.current.write().unwrap();
+                let mut t = self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 match t.lookup(p) {
                     Some(0) => {}
                     Some(i) if !still_there => {
@@ -554,7 +559,7 @@ impl Engine {
             }
             if let Some(b) = &building {
                 if !still_there {
-                    let mut t = b.write().unwrap();
+                    let mut t = b.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(i) = t.lookup(p) {
                         if i != 0 {
                             t.remove(i);
@@ -564,7 +569,7 @@ impl Engine {
             }
         }
         if !relist.is_empty() {
-            let m = self.matcher.lock().unwrap().clone();
+            let m = self.matcher.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
             let noop = |_: EngineEvent| {};
             changed.extend(self.refresh_internal(relist, m.as_deref().unwrap_or(&NoMatch), &noop));
         }
@@ -575,7 +580,7 @@ impl Engine {
     /// dropped. Paths the tree doesn't hold refresh their nearest known ancestor.
     pub fn refresh(&self, dirs: &[String], matcher: &dyn WalkMatcher, sink: &(dyn Fn(EngineEvent) + Sync)) -> Vec<String> {
         let items: Vec<(String, bool)> = dirs.iter().map(|d| (d.clone(), false)).collect();
-        if let Some((q, _)) = self.queued.lock().unwrap().as_mut() {
+        if let Some((q, _)) = self.queued.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
             q.extend(items.iter().cloned());
         }
         self.refresh_internal(items, matcher, sink)
@@ -583,13 +588,13 @@ impl Engine {
 
     /// Watch the root with FSEvents (replaying history since the tree's event id when possible).
     pub fn watch(self: &Arc<Self>, matcher: Arc<dyn WalkMatcher>, sink: Arc<dyn Fn(EngineEvent) + Send + Sync>) -> WatchHandle {
-        *self.matcher.lock().unwrap() = Some(matcher.clone());
+        *self.matcher.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(matcher.clone());
         let since = {
-            let cur = self.current.read().unwrap();
+            let cur = self.current.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             if !cur.is_empty() && cur.event_id > 0 && self.resumable.load(Ordering::Relaxed) {
                 cur.event_id
-            } else if let Some(b) = self.building.read().unwrap().clone() {
-                b.read().unwrap().event_id
+            } else if let Some(b) = self.building.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
+                b.read().unwrap_or_else(std::sync::PoisonError::into_inner).event_id
             } else {
                 ffi::kFSEventStreamEventIdSinceNow
             }
@@ -629,7 +634,7 @@ impl Engine {
             items.push((p, deep));
         }
         {
-            let mut q = self.queued.lock().unwrap();
+            let mut q = self.queued.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some((qi, qid)) = q.as_mut() {
                 qi.extend(items);
                 *qid = (*qid).max(max_id);
@@ -642,14 +647,14 @@ impl Engine {
         }
         let changed = if items.is_empty() { Vec::new() } else { self.refresh_internal(items, matcher, sink) };
         if max_id > 0 {
-            let mut t = self.current.write().unwrap();
+            let mut t = self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             t.event_id = t.event_id.max(max_id);
         }
         changed
     }
 
     fn refresh_internal(&self, mut items: Vec<(String, bool)>, matcher: &dyn WalkMatcher, sink: &(dyn Fn(EngineEvent) + Sync)) -> Vec<String> {
-        let _g = self.refresh_lock.lock().unwrap();
+        let _g = self.refresh_lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let scope = self.scope();
         // Deduplicate; a deep refresh covers everything below it.
         for it in items.iter_mut() {
@@ -674,7 +679,7 @@ impl Engine {
         for (path, deep) in items {
             // Resolve to a folder the tree holds.
             let target = {
-                let mut t = self.current.write().unwrap();
+                let mut t = self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if t.is_empty() {
                     break;
                 }
@@ -707,9 +712,9 @@ impl Engine {
             if !done_dirs.insert(target) {
                 continue;
             }
-            let dir_path = self.current.read().unwrap().path(target);
+            let dir_path = self.current.read().unwrap_or_else(std::sync::PoisonError::into_inner).path(target);
             let res = bulk::list(Path::new(&dir_path), &mut listing);
-            let mut t = self.current.write().unwrap();
+            let mut t = self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if t.is_dead(target) {
                 continue;
             }
@@ -761,7 +766,7 @@ impl Engine {
                 sink(EngineEvent::Matched(m));
             }
         }
-        let mut t = self.current.write().unwrap();
+        let mut t = self.current.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if t.dead > 200_000 && t.dead > t.len() / 4 {
             t.compact();
         }

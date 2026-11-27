@@ -305,7 +305,7 @@ impl<'a> Walk<'a> {
         let jobs = match res {
             Err(e) => {
                 let code = err_code(e.raw_os_error().unwrap_or(libc::EIO), self.scope.fda);
-                let mut t = self.tree.write().unwrap();
+                let mut t = self.tree.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                 t.err[job.idx as usize] = code;
                 t.finish(job.idx, &mut matched);
                 Vec::new()
@@ -368,7 +368,7 @@ impl<'a> Walk<'a> {
             }
         }
         let t0 = std::time::Instant::now();
-        let mut t = self.tree.write().unwrap();
+        let mut t = self.tree.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         self.stats.lock_wait_ns.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         // Hard links: count each (dev, inode) once, in the folder that saw it first.
         let mut seen_here: HashSet<(u64, u64)> = HashSet::new();

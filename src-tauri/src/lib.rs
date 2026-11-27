@@ -202,7 +202,26 @@ async fn mcp_install(client: String) -> Result<Vec<McpClient>, String> {
     .await?
 }
 
+/// Panics (on any thread) go to ~/Library/Logs/Disko/disko.log, so a misbehaving long-running app
+/// leaves evidence. The default hook still runs.
+fn log_panics() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let dir = disko_core::paths::home().join("Library/Logs/Disko");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("disko.log")) {
+                let when = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                let thread = std::thread::current().name().unwrap_or("?").to_string();
+                let _ = writeln!(f, "[{when}] panic on {thread}: {info}\n{}", std::backtrace::Backtrace::force_capture());
+            }
+        }
+        default(info);
+    }));
+}
+
 pub fn run() {
+    log_panics();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -253,6 +272,7 @@ pub fn run() {
 /// `Disko --mcp`: MCP server on stdio. Uses the app's snapshot and FSEvents to be current within
 /// seconds; scans only when there's no usable snapshot.
 pub fn mcp_cli() -> i32 {
+    log_panics();
     let emit: hub::Emit = Arc::new(|_, _| {});
     let hub = hub::create(emit, true);
     hub.start();
@@ -289,7 +309,7 @@ pub fn bench_cli(args: &[String]) -> i32 {
     std::thread::sleep(std::time::Duration::from_millis(300));
     while hub.is_scanning() {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        let mut f = first.lock().unwrap();
+        let mut f = first.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if f.is_none() && !hub.all_findings().is_empty() {
             *f = Some(started.elapsed().as_millis());
         }
@@ -312,7 +332,7 @@ pub fn bench_cli(args: &[String]) -> i32 {
     let snapshot = disko_core::paths::cache_dir().join("snapshot.bin");
     let out = json!({
         "elapsed_ms": started.elapsed().as_millis(),
-        "first_finding_ms": *first.lock().unwrap(),
+        "first_finding_ms": *first.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
         "files": p.files,
         "dirs": p.dirs,
         "scanned_bytes": p.bytes,

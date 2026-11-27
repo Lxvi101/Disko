@@ -9,11 +9,12 @@ import { api } from '../../lib/api';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { Tip } from '../../components/ui/Tip';
 import type { TreeNode } from '../../lib/types';
-import type { MapNode } from './model';
+import { distinctOther, type MapNode } from './model';
+import { itemProps } from '../../lib/interact';
 
 /** Left panel: the current folder's items, biggest first. Clicking a folder opens it. */
 export const FolderList: React.FC<{ tree: MapNode }> = ({ tree }) => {
-  const kids = tree.children ?? [];
+  const kids: MapNode[] = tree.children ?? [];
   const max = Math.max(1, ...kids.map((k) => k.bytes));
   const s = splitBytes(tree.bytes);
   return (
@@ -29,9 +30,10 @@ export const FolderList: React.FC<{ tree: MapNode }> = ({ tree }) => {
           </div>
         </div>
       </div>
-      <div className="scroll flex-1 min-h-0 px-2 pb-24">
+      {/* Keyed by folder: opening another folder swaps the list; removals inside one still animate out. */}
+      <div key={tree.path} className="scroll flex-1 min-h-0 px-2 pb-24">
         <AnimatePresence initial={false}>
-          {kids.map((k, i) => <Row key={k.path} node={k} max={max} index={i} />)}
+          {kids.map((k, i) => <Row key={k.from ?? k.path} node={k} max={max} index={i} />)}
         </AnimatePresence>
       </div>
     </div>
@@ -48,7 +50,8 @@ export const Row: React.FC<{ node: MapNode; max: number; index: number; indent?:
   const ref = useRef<HTMLDivElement>(null);
   const cat = catOf(node.clutter);
   const s = splitBytes(node.bytes);
-  const selectable = node.kind === 'dir' || node.kind === 'file';
+  const pickable = node.kind === 'dir' || node.kind === 'file';
+  const selectable = pickable && !node.protected;
   const color = cat?.color ?? (node.kind === 'hidden' ? '#7c7a92' : 'var(--muted)');
 
   // Hovering the map scrolls the matching row into view.
@@ -71,6 +74,7 @@ export const Row: React.FC<{ node: MapNode; max: number; index: number; indent?:
           onDoubleClick={() => expandable && node.kind === 'dir' && openFolder(node.path)}
           onMouseEnter={() => setHover(node.path)}
           onMouseLeave={() => setHover(null)}
+          {...itemProps(pickable ? sel.node(node) : null, { folder: node.kind === 'dir' ? node.path : undefined })}
           className="flex items-center gap-3 rounded-2xl pr-3 py-2.5 transition-colors"
           style={{ paddingLeft: 10 + indent * 26, background: hovered ? 'var(--panel-2)' : picked ? 'var(--accent-soft)' : undefined, cursor: node.kind === 'dir' ? 'pointer' : 'default' }}
         >
@@ -104,7 +108,7 @@ const Children: React.FC<{ path: string; indent: number }> = ({ path, indent }) 
   const version = useStore((s) => s.treeVersion + s.scanTick);
   const gone = useStore((s) => s.gone);
   const [t, setT] = useState<TreeNode | null>(null);
-  useEffect(() => { api.tree(path, 1).then(setT).catch(() => {}); }, [path, version]);
+  useEffect(() => { api.tree(path, 1).then((x) => setT(x && distinctOther(x))).catch(() => {}); }, [path, version]);
   if (!t) return <div className="h-10 mx-10 my-1 rounded-xl shimmer" />;
   const kids = (t.children ?? []).filter((c) => !gone.has(c.path));
   const max = Math.max(1, ...kids.map((k) => k.bytes));
@@ -112,12 +116,12 @@ const Children: React.FC<{ path: string; indent: number }> = ({ path, indent }) 
 };
 
 export const ListView: React.FC<{ tree: MapNode }> = ({ tree }) => {
-  const kids = tree.children ?? [];
+  const kids: MapNode[] = tree.children ?? [];
   const max = Math.max(1, ...kids.map((k) => k.bytes));
   return (
-    <div className="scroll h-full px-3 pb-28">
+    <div key={tree.path} className="scroll h-full px-3 pb-28">
       <AnimatePresence initial={false}>
-        {kids.map((k, i) => <Row key={k.path} node={k} max={max} index={i} expandable />)}
+        {kids.map((k, i) => <Row key={k.from ?? k.path} node={k} max={max} index={i} expandable />)}
       </AnimatePresence>
     </div>
   );

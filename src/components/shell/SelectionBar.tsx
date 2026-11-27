@@ -13,6 +13,7 @@ export const SelectionBar: React.FC = () => {
   const selection = useStore((s) => s.selection);
   const clear = useStore((s) => s.clearSelection);
   const remove = useStore((s) => s.remove);
+  const dragging = useStore((s) => !!s.dragging);
   const items = [...selection.values()];
   const total = items.reduce((a, i) => a + i.bytes, 0);
   const t = splitBytes(total);
@@ -20,7 +21,7 @@ export const SelectionBar: React.FC = () => {
   const allTrash = items.every((i) => i.trash);
   return (
     <AnimatePresence>
-      {items.length > 0 && (
+      {items.length > 0 && !dragging && (
         <motion.div
           initial={{ y: 90, opacity: 0, x: '-50%' }}
           animate={{ y: 0, opacity: 1, x: '-50%' }}

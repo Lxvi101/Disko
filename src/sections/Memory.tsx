@@ -24,7 +24,10 @@ export const Memory: React.FC = () => {
   if (!memory) return <div className="p-7"><div className="h-40 rounded-[28px] shimmer" /></div>;
   return (
     <div className="scroll h-full px-7 pb-32">
-      <div className="gap-5 [&>*]:mb-5 [&>*]:break-inside-avoid" style={{ columns: '2 440px' }}>
+      {/* Two fixed columns (stacked when narrow). CSS columns re-balanced cards between columns
+          whenever one grew, e.g. when the agents list arrived, so the page jumped. */}
+      <div className="flex flex-wrap gap-5 items-start">
+        <div className="flex-1 min-w-[min(440px,100%)] flex flex-col gap-5">
         <Connect />
         <Card title="Routines" icon={Clock} color="#c8875c">
           {!memory.routines.length && <Empty>Turn on the clock on any clutter card.</Empty>}
@@ -32,6 +35,8 @@ export const Memory: React.FC = () => {
             {memory.routines.map((r) => <RoutineRow key={r.id} r={r} />)}
           </AnimatePresence>
         </Card>
+        </div>
+        <div className="flex-1 min-w-[min(440px,100%)] flex flex-col gap-5">
         <Card title="Always keep" icon={Shield} color="#6fa588" extra={<AddKeep />}>
           {!memory.keep.length && <Empty>Nothing yet. Disko never touches what you list here.</Empty>}
           <AnimatePresence initial={false}>
@@ -59,6 +64,7 @@ export const Memory: React.FC = () => {
           </AnimatePresence>
           <Community />
         </Card>
+        </div>
       </div>
     </div>
   );

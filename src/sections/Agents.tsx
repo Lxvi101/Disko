@@ -5,10 +5,16 @@ import { useStore, sel, type SelItem } from '../store';
 import { age, date, daysSince, splitBytes } from '../lib/format';
 import { Glyph, GlassIcon, glyphOf } from '../lib/icons';
 import { Checkbox } from '../components/ui/Checkbox';
+import { itemProps } from '../lib/interact';
 import type { AgentProject, AgentSession, AgentTool } from '../lib/types';
 
-const sessionItem = (tool: AgentTool, p: AgentProject, s: AgentSession): SelItem =>
-  sel.paths(`s:${tool.tool}:${p.name}:${s.id}`, s.title ?? p.name, s.paths, s.bytes, tool.icon);
+/** A session touched in the last 15 minutes is probably still running: never offer to trash it. */
+const live = (s: AgentSession) => !!s.last_used && Date.now() / 1000 - s.last_used < 15 * 60;
+
+const sessionItem = (tool: AgentTool, p: AgentProject, s: AgentSession): SelItem => ({
+  ...sel.paths(`s:${tool.tool}:${p.name}:${s.id}`, s.title ?? p.name, s.paths, s.bytes, tool.icon),
+  busy: live(s) ? `${tool.name} is using this session` : undefined,
+});
 
 export const Agents: React.FC = () => {
   const tools = useStore((s) => s.sessions);
@@ -85,7 +91,7 @@ const ProjectRow: React.FC<{ tool: AgentTool; p: AgentProject; max: number; inde
   const [open, setOpen] = useState(false);
   const selection = useStore((s) => s.selection);
   const setMany = useStore((s) => s.setMany);
-  const items = p.sessions.map((s) => sessionItem(tool, p, s));
+  const items = p.sessions.map((s) => sessionItem(tool, p, s)).filter((i) => !i.busy);
   const n = items.filter((i) => selection.has(i.key)).length;
   const [, color] = glyphOf(tool.icon);
   const s = splitBytes(p.bytes);
@@ -93,7 +99,7 @@ const ProjectRow: React.FC<{ tool: AgentTool; p: AgentProject; max: number; inde
   return (
     <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -40, height: 0 }} transition={{ delay: Math.min(0.25, index * 0.02) }} className="rounded-[24px]" style={{ background: open ? 'var(--panel)' : undefined }}>
       <div className="flex items-center gap-4 px-4 py-3 rounded-[24px] row-hover cursor-pointer" onClick={() => setOpen(!open)}>
-        <Checkbox checked={n === items.length && n > 0} mixed={n > 0 && n < items.length} onChange={(v) => setMany(items, v)} />
+        <Checkbox checked={n === items.length && n > 0} mixed={n > 0 && n < items.length} disabled={!items.length} onChange={(v) => setMany(items, v)} />
         <ChevronRight size={18} className="muted shrink-0 transition-transform" style={{ transform: open ? 'rotate(90deg)' : undefined }} />
         <Glyph name="folder" size={42} color={color} />
         <div className="flex-1 min-w-0">
@@ -127,16 +133,20 @@ const SessionRow: React.FC<{ item: SelItem; s: AgentSession }> = ({ item, s }) =
   const picked = useStore((st) => st.selection.has(item.key));
   const toggle = useStore((st) => st.toggle);
   const b = splitBytes(s.bytes);
+  const busy = !!item.busy;
   return (
-    <motion.div layout exit={{ opacity: 0, x: 40, height: 0 }} className="flex items-center gap-4 pl-[74px] pr-4 py-2.5 rounded-2xl row-hover mx-1" onClick={() => toggle(item)} style={{ background: picked ? 'var(--accent-soft)' : undefined }}>
-      <Checkbox checked={picked} onChange={() => toggle(item)} size={20} />
-      <span className="flex-1 min-w-0 text-[15px] font-medium truncate">{s.title ?? s.id}</span>
+    <motion.div layout exit={{ opacity: 0, x: 40, height: 0 }}>
+    <div {...itemProps(item, { path: s.paths[0] })} className="flex items-center gap-4 pl-[74px] pr-4 py-2.5 rounded-2xl row-hover mx-1" onClick={() => !busy && toggle(item)} style={{ background: picked ? 'var(--accent-soft)' : undefined }}>
+      <Checkbox checked={picked} disabled={busy} onChange={() => toggle(item)} size={20} />
+      <span className="flex-1 min-w-0 text-[15px] font-medium truncate" style={{ opacity: busy ? 0.55 : 1 }}>{s.title ?? s.id}</span>
+      {busy && <span className="text-[12.5px] font-medium shrink-0 flex items-center gap-1.5" style={{ color: 'var(--ok)' }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--ok)', animation: 'breathe 1.6s ease-in-out infinite' }} />In use</span>}
       <span className="muted text-[14px] w-[110px] text-right shrink-0">{date(s.started ?? s.last_used)}</span>
       <span className="muted text-[14px] w-[100px] text-right shrink-0">{age(s.last_used)}</span>
       <div className="w-[96px] text-right shrink-0">
         <span className="num font-semibold text-[15px]">{b.value}</span>
         <span className="num text-[12px] unit ml-1">{b.unit}</span>
       </div>
+    </div>
     </motion.div>
   );
 };

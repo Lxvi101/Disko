@@ -47,7 +47,7 @@ All return JSON matching `crates/core/src/types.rs` (camelCase is NOT used; fiel
 |---|---|---|
 | `boot` | – | `{ version, home, full_disk_access: bool, volume: VolumeInfo, snapshot_age_s: number\|null }` and starts the scan automatically |
 | `rescan` | – | `null` (restarts the one scan) |
-| `tree` | `{ path: string\|null, depth: number }` | `TreeNode` (null path = root "/") |
+| `tree` | `{ path: string\|null, depth: number }` | `TreeNode` (null path = root "/"; `protected: true` on nodes the protected-path guard refuses to remove, so the UI never offers to) |
 | `search` | `{ query: string, limit?: number }` | `TreeNode[]` (flat, no children) |
 | `clutter` | – | `Finding[]` (current set) |
 | `clean` | `{ ids: string[], paths: string[] }` | `CleanResult` |

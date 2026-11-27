@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChartPie, ChevronLeft, ChevronRight, HardDrive, Home, LayoutGrid, List, ShieldCheck, CircleDot } from 'lucide-react';
+import { ChartPie, ChevronLeft, ChevronRight, HardDrive, Home, LayoutGrid, List, ShieldCheck, CircleDot, X } from 'lucide-react';
 import { useStore, type SpaceView } from '../../store';
 import { api } from '../../lib/api';
 import { parentOf } from '../../lib/format';
@@ -20,12 +20,13 @@ const VIEWS: { id: SpaceView; icon: typeof ChartPie; label: string }[] = [
 ];
 
 export const Space: React.FC = () => {
-  const { tree } = useSpaceTree();
+  const { tree, error, retry } = useSpaceTree();
   const view = useStore((s) => s.spaceView);
   const boot = useStore((s) => s.boot);
+  const [accessDismissed, setAccessDismissed] = useState(() => { try { return localStorage.getItem('disko.fda-dismissed') === '1'; } catch { return false; } });
   return (
     <div className="flex flex-col h-full min-h-0 px-5 pb-5 gap-4">
-      {boot && !boot.full_disk_access && <AccessCard />}
+      {boot && !boot.full_disk_access && !accessDismissed && <AccessCard onDismiss={() => { setAccessDismissed(true); try { localStorage.setItem('disko.fda-dismissed', '1'); } catch { /* private mode */ } }} />}
       <div className="flex items-center gap-3">
         <Breadcrumb />
         <div className="flex-1" />
@@ -34,7 +35,7 @@ export const Space: React.FC = () => {
       <div className="flex-1 min-h-0 flex gap-4">
         {view !== 'list' && (
           <div className="glass rounded-[28px] w-[clamp(320px,30vw,420px)] shrink-0 min-h-0 overflow-hidden">
-            {tree ? <FolderList tree={tree} /> : <Skeleton />}
+            {tree ? <FolderList tree={tree} /> : error ? null : <Skeleton />}
           </div>
         )}
         <div className={`flex-1 min-w-0 min-h-0 relative ${view === 'list' ? 'glass rounded-[28px] pt-3' : view === 'sunburst' ? 'p-2' : 'p-1'}`}>
@@ -43,11 +44,33 @@ export const Space: React.FC = () => {
             : view === 'bubbles' ? <Bubbles tree={tree} />
             : view === 'blocks' ? <Blocks tree={tree} />
             : <ListView tree={tree} />
+          ) : error ? (
+            <MapError error={error} retry={retry} />
+          ) : view === 'list' ? (
+            <Skeleton />
           ) : (
             <div className="w-full h-full flex items-center justify-center"><div className="w-[60%] aspect-square rounded-full shimmer" /></div>
           )}
         </div>
       </div>
+    </div>
+  );
+};
+
+/** The map couldn't load: say so and offer the two things that help, instead of shimmering forever. */
+const MapError: React.FC<{ error: string; retry: () => void }> = ({ error, retry }) => {
+  const scanning = useStore((s) => !!s.progress && s.progress.phase !== 'done' && s.progress.phase !== 'none');
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center text-center gap-3 px-8">
+      <GlassIcon icon={HardDrive} color="#6e8dcf" size={64} />
+      <div className="text-[22px] font-semibold tracking-[-0.02em] mt-2">{scanning ? 'Still looking at your disk…' : 'The map didn’t load'}</div>
+      <div className="muted text-[14px] max-w-[420px]">{scanning ? 'It shows up the moment the first folders are measured.' : error}</div>
+      {!scanning && (
+        <div className="flex gap-2 mt-2">
+          <button className="btn" onClick={retry}>Try again</button>
+          <button className="btn btn-primary" onClick={() => { api.rescan(); retry(); }}>Scan again</button>
+        </div>
+      )}
     </div>
   );
 };
@@ -109,7 +132,7 @@ const ViewSwitch: React.FC = () => {
 };
 
 /** Inline, never blocking. */
-const AccessCard: React.FC = () => {
+const AccessCard: React.FC<{ onDismiss: () => void }> = ({ onDismiss }) => {
   const [asked, setAsked] = useState(false);
   const refreshBoot = useStore((s) => s.refreshBoot);
   const hidden = useStore((s) => s.volume?.hidden.find((h) => h.kind === 'unreadable'));
@@ -126,6 +149,9 @@ const AccessCard: React.FC = () => {
         ) : (
           <button className="btn btn-primary" onClick={() => { setAsked(true); api.openFullDiskAccess(); }}>Open Settings</button>
         )}
+        <Tip content="Hide. Settings still has it." side="bottom">
+          <button className="btn btn-ghost btn-icon !w-9 !h-9" aria-label="Hide" onClick={onDismiss}><X size={17} /></button>
+        </Tip>
       </motion.div>
     </AnimatePresence>
   );

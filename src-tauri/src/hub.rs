@@ -27,22 +27,22 @@ struct Matchers {
 
 impl WalkMatcher for Matchers {
     fn on_dir(&self, path: &Path, name: &str, siblings: &[&str]) -> Option<u32> {
-        if let Some(t) = self.clutter_m.read().unwrap().on_dir(path, name, siblings) {
+        if let Some(t) = self.clutter_m.read().unwrap_or_else(std::sync::PoisonError::into_inner).on_dir(path, name, siblings) {
             return Some(t);
         }
-        self.learned.read().unwrap().on_dir(path, name, siblings)
+        self.learned.read().unwrap_or_else(std::sync::PoisonError::into_inner).on_dir(path, name, siblings)
     }
     fn on_file(&self, path: &Path, name: &str, bytes: u64, mtime: i64) -> Option<u32> {
-        if let Some(t) = self.clutter_m.read().unwrap().on_file(path, name, bytes, mtime) {
+        if let Some(t) = self.clutter_m.read().unwrap_or_else(std::sync::PoisonError::into_inner).on_file(path, name, bytes, mtime) {
             return Some(t);
         }
-        self.learned.read().unwrap().on_file(path, name, bytes, mtime)
+        self.learned.read().unwrap_or_else(std::sync::PoisonError::into_inner).on_file(path, name, bytes, mtime)
     }
     fn category(&self, tag: u32) -> Category {
         if tag >= LEARNED_BASE {
-            self.learned.read().unwrap().category(tag)
+            self.learned.read().unwrap_or_else(std::sync::PoisonError::into_inner).category(tag)
         } else {
-            self.clutter_m.read().unwrap().category(tag)
+            self.clutter_m.read().unwrap_or_else(std::sync::PoisonError::into_inner).category(tag)
         }
     }
 }
@@ -113,7 +113,7 @@ impl Hub {
     }
 
     fn clutter(&self) -> Arc<Clutter> {
-        self.matchers.clutter.read().unwrap().clone()
+        self.matchers.clutter.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     // ---------- events ----------
@@ -131,7 +131,7 @@ impl Hub {
     }
 
     fn flush(&self) {
-        let p = std::mem::take(&mut *self.pending.lock().unwrap());
+        let p = std::mem::take(&mut *self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         if !p.upsert.is_empty() {
             let list: Vec<&Finding> = p.upsert.values().collect();
             (self.emit)("clutter:upsert", json!(list));
@@ -151,14 +151,14 @@ impl Hub {
         let mut visible = Vec::new();
         let mut hidden = Vec::new();
         {
-            let mut store = self.store.lock().unwrap();
+            let mut store = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let keep = store.keep();
             for f in &list {
                 if keep.finding_kept_by(f).is_some() { hidden.push(f.id.clone()) } else { visible.push(f.clone()) }
             }
         }
         {
-            let mut map = self.findings.write().unwrap();
+            let mut map = self.findings.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             for f in list {
                 if f.paths.is_empty() || f.bytes == 0 && f.category != Category::Leftovers && f.category != Category::OldVersions {
                     map.remove(&f.id);
@@ -167,7 +167,7 @@ impl Hub {
                 map.insert(f.id.clone(), f);
             }
         }
-        let mut p = self.pending.lock().unwrap();
+        let mut p = self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for f in visible {
             p.remove.remove(&f.id);
             p.upsert.insert(f.id.clone(), f);
@@ -182,8 +182,8 @@ impl Hub {
         if ids.is_empty() {
             return;
         }
-        let mut map = self.findings.write().unwrap();
-        let mut p = self.pending.lock().unwrap();
+        let mut map = self.findings.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut p = self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for id in ids {
             map.remove(id);
             p.upsert.remove(id);
@@ -195,13 +195,13 @@ impl Hub {
         if paths.is_empty() {
             return;
         }
-        self.pending.lock().unwrap().changed.extend(paths);
+        self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).changed.extend(paths);
     }
 
     fn on_event(&self, ev: EngineEvent) {
         match ev {
             EngineEvent::Progress(p) => {
-                *self.progress.lock().unwrap() = p.clone();
+                *self.progress.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = p.clone();
                 (self.emit)("scan:progress", json!(p));
             }
             EngineEvent::Tree(t) => (self.emit)("scan:tree", json!(t)),
@@ -219,7 +219,7 @@ impl Hub {
 
     fn on_matched(&self, m: Matched) {
         let f = if m.tag >= LEARNED_BASE {
-            self.matchers.learned.read().unwrap().finding(&m)
+            self.matchers.learned.read().unwrap_or_else(std::sync::PoisonError::into_inner).finding(&m)
         } else {
             self.clutter().on_matched(m)
         };
@@ -234,7 +234,7 @@ impl Hub {
         let mut drop = Vec::new();
         let mut update = Vec::new();
         {
-            let map = self.findings.read().unwrap();
+            let map = self.findings.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             for f in map.values() {
                 if !f.paths.iter().any(|p| gone.contains(p) || gone.iter().any(|g| p.starts_with(&format!("{}/", g)))) {
                     continue;
@@ -276,7 +276,7 @@ impl Hub {
             let _ = std::fs::remove_dir(&old); // only if now empty
         });
         let age = self.engine.load_snapshot();
-        *self.snapshot_age.lock().unwrap() = age;
+        *self.snapshot_age.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = age;
         if let Some(t) = self.engine.tree(None, 3) {
             (self.emit)("scan:tree", json!(t));
         }
@@ -284,7 +284,7 @@ impl Hub {
         let hub = self.clone();
         std::thread::spawn(move || {
             let (rules, home) = {
-                let mut s = hub.store.lock().unwrap();
+                let mut s = hub.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 (s.active_rules(), s.home().to_path_buf())
             };
             hub.upsert(disko_memory::rules::static_findings(&rules, &home, 200));
@@ -312,7 +312,7 @@ impl Hub {
             }
         });
         let m: Arc<dyn WalkMatcher> = self.matchers.clone();
-        *self.watch.lock().unwrap() = Some(self.engine.watch(m, sink));
+        *self.watch.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(self.engine.watch(m, sink));
     }
 
     /// After loading a snapshot without rescanning, ask the engine for the matched folders' totals.
@@ -330,7 +330,7 @@ impl Hub {
     fn clone_and_scan(&self) {
         // `on_event` only has &self; scanning needs an Arc. Every Hub lives in an Arc, so find it
         // through the watch sink's owner: simplest is a global registry.
-        if let Some(h) = HUB.lock().unwrap().as_ref().and_then(|w| w.upgrade()) {
+        if let Some(h) = HUB.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().and_then(|w| w.upgrade()) {
             h.rescan();
         }
     }
@@ -338,7 +338,7 @@ impl Hub {
     /// Start (or restart) the one scan in the background.
     pub fn rescan(self: &Arc<Self>) {
         let cancel = {
-            let mut c = self.cancel.lock().unwrap();
+            let mut c = self.cancel.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             c.store(true, Ordering::SeqCst);
             let fresh = Arc::new(AtomicBool::new(false));
             *c = fresh.clone();
@@ -372,12 +372,12 @@ impl Hub {
                 let _ = probes.join();
                 hub.scanning.store(false, Ordering::SeqCst);
                 if res.is_ok() && !cancel.load(Ordering::SeqCst) {
-                    *hub.last_done.lock().unwrap() = Some(Instant::now());
-                    *hub.snapshot_age.lock().unwrap() = Some(Duration::ZERO);
-                    let mut p = hub.progress.lock().unwrap().clone();
+                    *hub.last_done.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
+                    *hub.snapshot_age.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Duration::ZERO);
+                    let mut p = hub.progress.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
                     p.phase = "done".into();
                     p.fraction = 1.0;
-                    *hub.progress.lock().unwrap() = p.clone();
+                    *hub.progress.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = p.clone();
                     (hub.emit)("scan:progress", json!(p));
                     (hub.emit)("volume", json!(hub.engine.volume()));
                 }
@@ -393,14 +393,14 @@ impl Hub {
     }
 
     pub fn progress(&self) -> ScanProgress {
-        self.progress.lock().unwrap().clone()
+        self.progress.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
     pub fn snapshot_age(&self) -> Option<Duration> {
-        if let Some(t) = *self.last_done.lock().unwrap() {
+        if let Some(t) = *self.last_done.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
             return Some(t.elapsed());
         }
-        *self.snapshot_age.lock().unwrap()
+        *self.snapshot_age.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Every few seconds: pick up memory changes made by agents; every 10 minutes: due routines.
@@ -408,7 +408,7 @@ impl Hub {
         let mut last_routines = Instant::now() - Duration::from_secs(3600);
         loop {
             std::thread::sleep(Duration::from_secs(3));
-            let changed = self.store.lock().unwrap().refresh();
+            let changed = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).refresh();
             if changed {
                 self.memory_changed();
             }
@@ -422,8 +422,8 @@ impl Hub {
     // ---------- queries ----------
 
     pub fn visible_findings(&self) -> Vec<Finding> {
-        let all: Vec<Finding> = self.findings.read().unwrap().values().cloned().collect();
-        let mut store = self.store.lock().unwrap();
+        let all: Vec<Finding> = self.findings.read().unwrap_or_else(std::sync::PoisonError::into_inner).values().cloned().collect();
+        let mut store = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let keep = store.keep();
         let mut v: Vec<Finding> = all.into_iter().filter(|f| keep.finding_kept_by(f).is_none()).collect();
         v.sort_by(|a, b| b.bytes.cmp(&a.bytes));
@@ -431,7 +431,7 @@ impl Hub {
     }
 
     pub fn all_findings(&self) -> Vec<Finding> {
-        self.findings.read().unwrap().values().cloned().collect()
+        self.findings.read().unwrap_or_else(std::sync::PoisonError::into_inner).values().cloned().collect()
     }
 
     pub fn volume(&self) -> VolumeInfo {
@@ -442,7 +442,7 @@ impl Hub {
     pub fn app_storage(&self, path: &str) -> Option<disko_apps::AppStorage> {
         let mut st = disko_apps::storage(Path::new(path))?;
         {
-            let mut store = self.store.lock().unwrap();
+            let mut store = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let keep = store.keep();
             for f in st.groups.iter_mut().flat_map(|g| g.items.iter_mut()) {
                 if keep.finding_kept_by(f).is_some() {
@@ -450,7 +450,7 @@ impl Hub {
                 }
             }
         }
-        let mut map = self.storage.write().unwrap();
+        let mut map = self.storage.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         for f in st.groups.iter().flat_map(|g| g.items.iter()) {
             map.insert(f.id.clone(), f.clone());
         }
@@ -464,8 +464,8 @@ impl Hub {
     pub fn clean(&self, ids: &[String], trash_ids: &[String], paths: &[String]) -> CleanResult {
         let storage_ids: HashSet<String>;
         let mut findings: Vec<Finding> = {
-            let map = self.findings.read().unwrap();
-            let smap = self.storage.read().unwrap();
+            let map = self.findings.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let smap = self.storage.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut v: Vec<Finding> = Vec::new();
             for id in ids.iter().chain(trash_ids.iter()) {
                 if v.iter().any(|f| &f.id == id) {
@@ -522,7 +522,7 @@ impl Hub {
                 f.safety = disko_core::Safety::Review;
             }
         }
-        let is_kept = |p: &str| self.store.lock().unwrap().is_kept(p);
+        let is_kept = |p: &str| self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_kept(p);
         let mut result = if findings.is_empty() {
             CleanResult::default()
         } else {
@@ -548,7 +548,7 @@ impl Hub {
             }
         }
         {
-            let mut smap = self.storage.write().unwrap();
+            let mut smap = self.storage.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             for id in &result.removed {
                 smap.remove(id);
             }
@@ -643,7 +643,7 @@ impl Hub {
     // ---------- memory & routines ----------
 
     pub fn memory(&self) -> Memory {
-        self.store.lock().unwrap().memory()
+        self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).memory()
     }
 
     pub fn memory_update(&self, op: MemoryOp) -> Result<Memory, String> {
@@ -655,7 +655,7 @@ impl Hub {
             }
             other => other,
         };
-        let m = self.store.lock().unwrap().apply(op)?;
+        let m = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).apply(op)?;
         self.memory_changed();
         Ok(m)
     }
@@ -663,13 +663,13 @@ impl Hub {
     /// Keep list or rules changed (here or in another process): re-filter and re-match.
     pub fn memory_changed(&self) {
         let (rules, home, mem) = {
-            let mut s = self.store.lock().unwrap();
+            let mut s = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             (s.active_rules(), s.home().to_path_buf(), s.memory())
         };
-        *self.matchers.learned.write().unwrap() = Arc::new(LearnedMatcher::new(&rules, &home, LEARNED_BASE));
+        *self.matchers.learned.write().unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(LearnedMatcher::new(&rules, &home, LEARNED_BASE));
         // Drop findings of rules that no longer exist, add static matches of current ones.
         let ids: Vec<String> = {
-            let map = self.findings.read().unwrap();
+            let map = self.findings.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             map.values().filter(|f| f.rule.starts_with("learned.") || f.rule.starts_with("community.")).map(|f| f.id.clone()).collect()
         };
         self.drop_findings(&ids);
@@ -691,7 +691,7 @@ impl Hub {
         let now = disko_memory::now();
         let all = self.all_findings();
         let picked = {
-            let mut s = self.store.lock().unwrap();
+            let mut s = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             disko_memory::select(&all, routine, now, s.keep())
         };
         // Agent-made routines only move things to the Trash (tool commands still run as such).
@@ -702,7 +702,7 @@ impl Hub {
             (picked.iter().map(|f| f.id.clone()).collect(), Vec::new())
         };
         let r = self.clean(&ids, &trash, &[]);
-        let _ = self.store.lock().unwrap().record_run(&routine.id, now, r.freed);
+        let _ = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).record_run(&routine.id, now, r.freed);
         (self.emit)("memory", json!(self.memory()));
         r
     }
@@ -712,7 +712,7 @@ impl Hub {
         if self.snapshot_age().is_none() {
             return;
         }
-        let due = self.store.lock().unwrap().due_routines(disko_memory::now());
+        let due = self.store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).due_routines(disko_memory::now());
         for r in due {
             let res = self.run_one_routine(&r);
             if res.freed > 0 {
@@ -727,6 +727,6 @@ pub static HUB: Mutex<Option<std::sync::Weak<Hub>>> = Mutex::new(None);
 
 pub fn create(emit: Emit, headless: bool) -> Arc<Hub> {
     let hub = Hub::new(emit, headless);
-    *HUB.lock().unwrap() = Some(Arc::downgrade(&hub));
+    *HUB.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::downgrade(&hub));
     hub
 }

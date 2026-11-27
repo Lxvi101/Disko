@@ -25,6 +25,19 @@ export interface SelItem {
   /** Removing it can't be undone (emptying the Trash). Needs press-and-hold. */
   permanent?: boolean;
   busy?: string;
+  /** Never removable (system and top-level personal folders): only look at it. */
+  locked?: string;
+}
+
+/** What a right-click opened: the item(s) it acts on, plus the folder it can open in the map. */
+export interface MenuState {
+  x: number;
+  y: number;
+  items: SelItem[];
+  /** A folder the map can open. */
+  folder?: string;
+  /** Something Finder can show and Quick Look can preview. */
+  path?: string;
 }
 
 export interface Toast {
@@ -61,6 +74,11 @@ interface State {
   theme: Theme;
   dark: boolean;
   busyRemoving: boolean;
+  /** Items being dragged right now (the drop dock shows while set). */
+  dragging: SelItem[] | null;
+  menu: MenuState | null;
+  /** Last tree per folder, so coming back to Space (or to a folder) shows it instantly. */
+  treeCache: Map<string, TreeNode>;
 
   init: () => Promise<void>;
   go: (s: Section) => void;
@@ -81,6 +99,10 @@ interface State {
   refreshMemory: () => Promise<void>;
   refreshClutter: () => Promise<void>;
   refreshBoot: () => Promise<void>;
+  setDragging: (items: SelItem[] | null) => void;
+  openMenu: (m: MenuState) => void;
+  closeMenu: () => void;
+  keep: (items: SelItem[]) => Promise<void>;
 }
 
 const readTheme = (): Theme => {
@@ -128,6 +150,9 @@ export const useStore = create<State>((set, get) => ({
   theme: readTheme(),
   dark: resolveDark(readTheme()),
   busyRemoving: false,
+  dragging: null,
+  menu: null,
+  treeCache: new Map(),
 
   init: async () => {
     applyTheme(get().dark);
@@ -211,9 +236,9 @@ export const useStore = create<State>((set, get) => ({
   clearSelection: () => set({ selection: new Map() }),
 
   remove: async (items) => {
-    const busy = items.filter((i) => i.busy);
-    const todo = items.filter((i) => !i.busy);
-    if (busy.length) get().toast({ kind: 'info', title: `Skipped ${busy.length === 1 ? busy[0].title : `${busy.length} items`}`, sub: busy[0].busy });
+    const busy = items.filter((i) => i.busy || i.locked);
+    const todo = items.filter((i) => !i.busy && !i.locked);
+    if (busy.length) get().toast({ kind: 'info', title: `Skipped ${busy.length === 1 ? busy[0].title : `${busy.length} items`}`, sub: busy[0].locked ?? busy[0].busy });
     if (!todo.length) return;
 
     // 1. Make it vanish now.
@@ -322,6 +347,30 @@ export const useStore = create<State>((set, get) => ({
     } catch { /* keep last */ }
   },
   refreshBoot: async () => { try { const boot = await api.boot(); set({ boot, volume: boot.volume }); } catch { /* keep */ } },
+  setDragging: (dragging) => set({ dragging }),
+  openMenu: (menu) => set({ menu }),
+  closeMenu: () => { if (get().menu) set({ menu: null }); },
+
+  // "Always keep": Disko never suggests or removes these again. Findings they cover vanish now.
+  keep: async (items) => {
+    const paths = [...new Set(items.flatMap((i) => i.paths))];
+    if (!paths.length) return;
+    try {
+      let memory: Memory | null = null;
+      for (const p of paths) memory = await api.memoryUpdate({ type: 'keep', pattern: p });
+      const s = get();
+      const covered = (fp: string) => paths.some((k) => fp === k || fp.startsWith(k + '/'));
+      const findings = { ...s.findings };
+      for (const f of Object.values(findings)) if (f.paths.length && f.paths.every(covered)) delete findings[f.id];
+      const sel = new Map(s.selection);
+      for (const it of items) sel.delete(it.key);
+      set({ memory, findings, selection: sel });
+      get().toast({ kind: 'info', title: items.length === 1 ? `Keeping ${items[0].title}` : `Keeping ${items.length} items`, sub: 'Disko won’t suggest it again. Undo in Memory.' });
+      get().refreshClutter();
+    } catch (e) {
+      get().toast({ kind: 'error', title: 'Couldn’t keep that', sub: String(e) });
+    }
+  },
 }));
 
 function merge(rs: CleanResult[]): CleanResult {
@@ -384,6 +433,7 @@ export const sel = {
   node: (n: TreeNode): SelItem => ({
     key: `p:${n.path}`, kind: 'path', paths: [n.path], bytes: n.bytes, title: n.name, category: n.clutter,
     safety: 'review', trash: true, permanent: n.clutter === 'trash' && n.path.includes('/.Trash/'),
+    locked: n.protected ? 'Protected' : undefined,
   }),
   app: (a: AppInfo): SelItem => ({
     key: `a:${a.path}`, kind: 'app', paths: [a.path, ...a.data_paths], bytes: a.app_bytes + a.data_bytes, title: a.name,

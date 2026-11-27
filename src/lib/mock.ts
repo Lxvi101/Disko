@@ -187,10 +187,21 @@ const sizeOf = (n: MNode, t: number): number => (n.kind === 'file' ? (n.t <= t ?
 const filesOf = (n: MNode, t: number): number => (n.kind === 'file' ? (n.t <= t ? 1 : 0) : n.children.reduce((s, c) => s + filesOf(c, t), 0));
 const newestOf = (n: MNode): number => (n.kind === 'file' ? n.mtime : Math.max(n.mtime, ...n.children.map(newestOf)));
 
+/** A rough copy of the backend's protected-path guard (core/src/paths.rs), enough for the demo. */
+function mockProtected(p: string): boolean {
+  const parts = p.split('/').filter(Boolean);
+  if (parts.length < 2) return true;
+  const home = '/Users/alex';
+  const top = ['', '/Library', '/Documents', '/Desktop', '/Downloads', '/Pictures', '/Movies', '/Music', '/Applications', '/Development', '/Library/Application Support', '/Library/Caches', '/Library/Containers', '/Library/Developer', '/.Trash', '/.config', '/.cache', '/.local'];
+  if (top.some((t) => p === home + t)) return true;
+  return ['/opt/homebrew', '/private/var', '/usr/local', '/Library/Application Support', '/Library/Caches'].includes(p) || /\/\.git(\/|$)|\/(System|bin|sbin|etc)(\/|$)/.test(p);
+}
+
 function view(n: MNode, depth: number, t: number): TreeNode {
   const out: TreeNode = { name: n.name, path: n.path, kind: n.kind, bytes: sizeOf(n, t), files: filesOf(n, t), newest: newestOf(n) };
   if (n.clutter) out.clutter = n.clutter;
   if (n.error) out.error = n.error;
+  if (mockProtected(n.path)) out.protected = true;
   if (depth > 0 && n.kind === 'dir') {
     const kids = n.children.map((c) => ({ c, b: sizeOf(c, t) })).filter((x) => x.b > 0).sort((a, b) => b.b - a.b);
     const keepMin = out.bytes * 0.004;
@@ -708,7 +719,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       for (const n of byPath.values()) if (q && n.name.toLowerCase().includes(q)) out.push(view(n, 0, elapsed()));
       return r(out.sort((a, b) => b.bytes - a.bytes).slice(0, args.limit ?? 50));
     }
-    case 'clutter': return r([...emitted.values()]);
+    case 'clutter': return r([...emitted.values()].filter((f) => !f.paths.length || !f.paths.every((p) => memory.keep.some((k) => p === k.pattern || p.startsWith(k.pattern + '/')))));
     case 'clean': return r(clean(args.ids ?? [], args.paths ?? []));
     case 'undo': return r(undo(args.trashed ?? []));
     case 'apps': return r(apps());

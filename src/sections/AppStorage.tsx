@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { age, splitBytes } from '../lib/format';
 import { Glyph, Icon } from '../lib/icons';
 import { Checkbox } from '../components/ui/Checkbox';
+import { itemProps } from '../lib/interact';
 import { Tip } from '../components/ui/Tip';
 import type { AppInfo, AppStorage, Finding, StorageGroup } from '../lib/types';
 
@@ -159,6 +160,7 @@ const ItemRow: React.FC<{ f: Finding; onRemove: (items: Finding[]) => void }> = 
   const s = splitBytes(f.bytes);
   const row = (
     <div
+      {...itemProps(item)}
       className="group flex items-center gap-4 px-3 py-2.5 rounded-2xl row-hover"
       style={{ opacity: f.busy ? 0.5 : 1, background: picked ? 'var(--accent-soft)' : undefined }}
       onClick={() => !f.busy && toggle(item)}

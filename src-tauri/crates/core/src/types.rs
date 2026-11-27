@@ -167,6 +167,10 @@ pub struct TreeNode {
     /// into one `kind: "other"` child.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<TreeNode>>,
+    /// The protected-path guard refuses to remove it (system folders, top-level personal folders,
+    /// credentials, repositories' history …), so the UI doesn't offer to.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub protected: bool,
 }
 
 /// Where the space on the boot volume went, including what a file walk can't see.

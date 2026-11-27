@@ -5,6 +5,7 @@ import { useStore, sel } from '../store';
 import { age, daysSince, splitBytes, bytes } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { Checkbox } from '../components/ui/Checkbox';
+import { itemProps } from '../lib/interact';
 import { Tip } from '../components/ui/Tip';
 import { AppStorageView } from './AppStorage';
 import type { AppInfo } from '../lib/types';
@@ -82,9 +83,13 @@ const AppRow: React.FC<{ app: AppInfo; max: number; index: number; onOpen?: () =
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9, x: -40, transition: { duration: 0.25 } }}
       transition={{ type: 'spring', stiffness: 320, damping: 32, delay: Math.min(0.3, index * 0.02) }}
+    >
+    {/* A row with a storage page opens it, like any row with a chevron; the checkbox selects. */}
+    <div
+      {...itemProps(item)}
       className="group flex items-center gap-5 px-4 py-3 rounded-[24px] row-hover"
-      style={{ background: picked ? 'var(--accent-soft)' : undefined }}
-      onClick={() => !app.running && toggle(item)}
+      style={{ background: picked ? 'var(--accent-soft)' : undefined, cursor: onOpen ? 'pointer' : undefined }}
+      onClick={() => (onOpen ? onOpen() : !app.running && toggle(item))}
     >
       <Checkbox checked={picked} disabled={app.running} onChange={() => toggle(item)} title={app.running ? `${app.name} is open` : undefined} />
       <div className="relative">
@@ -122,6 +127,7 @@ const AppRow: React.FC<{ app: AppInfo; max: number; index: number; onOpen?: () =
           </button>
         </Tip>
       ) : <span className="w-10 shrink-0" />}
+    </div>
     </motion.div>
   );
 };

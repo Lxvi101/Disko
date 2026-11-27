@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { hierarchy, pack } from 'd3-hierarchy';
 import { Check } from 'lucide-react';
 import { useStore, sel } from '../../store';
+import { itemProps } from '../../lib/interact';
 import { splitBytes } from '../../lib/format';
 import { NodeIcon } from '../../lib/icons';
 import { catOf, tint } from '../../lib/categories';
@@ -57,7 +58,8 @@ const Bubble: React.FC<{ node: MapNode; x: number; y: number; r: number; index: 
   const base = cat?.color ?? (node.kind === 'hidden' ? '#7c7a92' : node.kind === 'other' ? '#6b7080' : hsl(hue, 40, dark ? 64 : 58));
   const a = cat ? (dark ? 32 : 36) : dark ? 17 : 20;
   const s = splitBytes(node.bytes);
-  const selectable = node.kind === 'dir' || node.kind === 'file';
+  const pickable = node.kind === 'dir' || node.kind === 'file';
+  const selectable = pickable && !node.protected;
   const icon = Math.min(64, Math.max(16, r * 0.42));
   return (
     <motion.div
@@ -72,6 +74,7 @@ const Bubble: React.FC<{ node: MapNode; x: number; y: number; r: number; index: 
     >
       <Tip content={node.kind === 'hidden' ? node.why : node.error} className="block w-full h-full">
         <button
+          {...itemProps(pickable ? sel.node(node) : null, { folder: node.kind === 'dir' ? node.path : undefined })}
           className="relative w-full h-full rounded-full flex flex-col items-center justify-center text-center overflow-hidden"
           style={{
             background: `radial-gradient(120% 95% at 50% 0%, ${tint(base, a + 10)}, ${tint(base, a)} 55%, ${tint(base, Math.max(6, a - 6))})`,
@@ -81,9 +84,9 @@ const Bubble: React.FC<{ node: MapNode; x: number; y: number; r: number; index: 
             cursor: node.kind === 'dir' ? 'pointer' : 'default',
           }}
           onClick={(e) => {
-            if (!selectable) return;
+            if (!pickable) return;
             if (node.kind === 'dir' && !e.metaKey && !e.altKey) openFolder(node.path);
-            else toggle(sel.node(node));
+            else if (selectable) toggle(sel.node(node));
           }}
         >
           <span className="relative">
